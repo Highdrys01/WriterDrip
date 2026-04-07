@@ -19,6 +19,7 @@ async function main() {
     await validateManifest();
     await validatePopupHtml();
     await validateSyntax();
+    await validateRepositoryHygiene();
     await validateBackgroundRuntime();
     await validatePopupRuntime();
     await validatePlanner();
@@ -54,6 +55,56 @@ async function validateSyntax() {
     for (const relativePath of scriptFiles) {
         const source = await fs.readFile(path.join(rootDir, relativePath), 'utf8');
         new vm.Script(source, { filename: relativePath });
+    }
+}
+
+async function validateRepositoryHygiene() {
+    const trackedGoogleVerificationFiles = await findFiles(rootDir, (relativePath) =>
+        /^docs\/google[a-z0-9]+\.html$/i.test(relativePath) || /^google[a-z0-9]+\.html$/i.test(relativePath)
+    );
+
+    assert.equal(
+        trackedGoogleVerificationFiles.length,
+        0,
+        'Repository should not track Search Console HTML verification files. Use the meta tag method instead.'
+    );
+
+    const textFilePaths = await findFiles(rootDir, (relativePath) => {
+        if (relativePath.startsWith('.git/')) {
+            return false;
+        }
+
+        const extension = path.extname(relativePath);
+        return [
+            '',
+            '.css',
+            '.html',
+            '.js',
+            '.json',
+            '.md',
+            '.txt',
+            '.xml',
+            '.yml',
+            '.yaml'
+        ].includes(extension);
+    });
+
+    const sensitivePatterns = [
+        { regex: /\/Users\/[^/\s]+\/(?:Desktop|Downloads)\//, label: 'local Desktop/Downloads path' },
+        { regex: /\b[A-Z0-9._%+-]+@gmail\.com\b/i, label: 'personal Gmail address' },
+        { regex: /\bfile:\/\/\/Users\//i, label: 'local file URL' }
+    ];
+
+    for (const relativePath of textFilePaths) {
+        const absolutePath = path.join(rootDir, relativePath);
+        const source = await fs.readFile(absolutePath, 'utf8');
+        for (const pattern of sensitivePatterns) {
+            assert.doesNotMatch(
+                source,
+                pattern.regex,
+                `${relativePath} should not contain a ${pattern.label}.`
+            );
+        }
     }
 }
 
@@ -343,6 +394,27 @@ async function flushMicrotasks() {
 
 function readFileSyncSafe(absolutePath) {
     return String(readFileSync(absolutePath));
+}
+
+async function findFiles(startDir, predicate, relativePrefix = '') {
+    const entries = await fs.readdir(startDir, { withFileTypes: true });
+    const results = [];
+
+    for (const entry of entries) {
+        const relativePath = relativePrefix ? path.posix.join(relativePrefix, entry.name) : entry.name;
+        const absolutePath = path.join(startDir, entry.name);
+
+        if (entry.isDirectory()) {
+            results.push(...await findFiles(absolutePath, predicate, relativePath));
+            continue;
+        }
+
+        if (predicate(relativePath)) {
+            results.push(relativePath);
+        }
+    }
+
+    return results;
 }
 
 main().catch((error) => {
