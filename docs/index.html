@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>WriterDrip | Free Open-Source Google Docs Typing Extension</title>
+    <meta
+      name="description"
+      content="WriterDrip is a free open-source Chrome extension for paced typing in Google Docs with flexible timelines, pause and resume controls, local-only behavior, and draft-aware correction intensity."
+    >
+    <meta name="google-site-verification" content="TsaaG3rlKwIRPHJNA5X-_BgfM1zNftYRJpHMGIjUyvQ">
+    <meta name="robots" content="index,follow,max-image-preview:large">
+    <link rel="canonical" href="https://highdrys01.github.io/WriterDrip/">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="WriterDrip | Free Open-Source Google Docs Typing Extension">
+    <meta
+      property="og:description"
+      content="A free open-source Chrome extension for paced typing in Google Docs with custom timelines, pause/resume controls, and draft-aware correction intensity."
+    >
+    <meta property="og:url" content="https://highdrys01.github.io/WriterDrip/">
+    <meta property="og:image" content="https://highdrys01.github.io/WriterDrip/assets/social-preview.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="WriterDrip | Free Open-Source Google Docs Typing Extension">
+    <meta
+      name="twitter:description"
+      content="Free open-source paced typing for Google Docs with custom timelines, pause/resume controls, and draft-aware correction intensity."
+    >
+    <meta name="twitter:image" content="https://highdrys01.github.io/WriterDrip/assets/social-preview.png">
+    <link rel="stylesheet" href="styles.css">
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "WriterDrip",
+        "applicationCategory": "BrowserApplication",
+        "operatingSystem": "Chrome, Chromium-based browsers",
+        "description": "WriterDrip is a free open-source Chrome extension for paced typing in Google Docs with flexible timelines, pause and resume controls, local-only behavior, and draft-aware correction intensity.",
+        "offers": {
+          "@type": "Offer",
+          "price": 0,
+          "priceCurrency": "USD"
+        },
+        "url": "https://highdrys01.github.io/WriterDrip/",
+        "downloadUrl": "https://github.com/Highdrys01/WriterDrip",
+        "codeRepository": "https://github.com/Highdrys01/WriterDrip",
+        "image": "https://highdrys01.github.io/WriterDrip/assets/social-preview.png"
+      }
+    </script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Free open-source Chrome extension for Google Docs</p>
+          <h1>WriterDrip</h1>
+          <p class="lede">
+            WriterDrip types user-provided text into the Google Doc already open in your browser over
+            a chosen timeline, with pause or resume controls, local-only behavior, and draft-aware
+            correction intensity.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="https://github.com/Highdrys01/WriterDrip">View on GitHub</a>
+            <a class="button button-secondary" href="#install">Install in Chrome</a>
+          </div>
+          <ul class="quick-points">
+            <li>Works with the Google Doc already open in your browser</li>
+            <li>Flexible timing from the draft minimum up to one week</li>
+            <li>Pause, resume, and stop controls with local state recovery</li>
+          </ul>
+        </div>
+        <div class="hero-visual">
+          <img
+            src="assets/writerdrip-overview-card.png"
+            alt="WriterDrip popup showing the draft area inside the extension"
+            width="640"
+            height="748"
+          >
+        </div>
+      </header>
+
+      <main>
+        <section class="section compare-callout">
+          <div class="section-copy">
+            <p class="section-label">Looking for Dripwriter?</p>
+            <h2>WriterDrip is a free open-source alternative.</h2>
+            <p>
+              If you searched for Dripwriter, WriterDrip gives you a similar paced typing workflow for
+              Google Docs without a paywall. WriterDrip is an independent project and is not affiliated
+              with Dripwriter.
+            </p>
+          </div>
+        </section>
+
+        <section class="section feature-grid" id="features">
+          <article class="feature-card">
+            <div class="feature-copy">
+              <p class="section-label">Flexible timing</p>
+              <h2>Choose a session that fits the draft.</h2>
+              <p>
+                Use the draft-sized minimum, type a custom duration, or jump to quick presets like
+                one hour, one day, or one week.
+              </p>
+            </div>
+            <img
+              src="assets/writerdrip-duration-card.png"
+              alt="WriterDrip duration controls with quick presets"
+              width="480"
+              height="488"
+            >
+          </article>
+
+          <article class="feature-card">
+            <div class="feature-copy">
+              <p class="section-label">Draft-aware corrections</p>
+              <h2>Let WriterDrip tune correction intensity automatically.</h2>
+              <p>
+                Keep it on Suggested for the draft-aware default, or switch to Low, Medium, or High
+                when you want more manual control.
+              </p>
+            </div>
+            <img
+              src="assets/writerdrip-correction-card.png"
+              alt="WriterDrip correction intensity controls"
+              width="480"
+              height="357"
+            >
+          </article>
+        </section>
+
+        <section class="section steps" id="install">
+          <div class="section-copy">
+            <p class="section-label">Install and use</p>
+            <h2>From GitHub clone to first run in a few minutes.</h2>
+          </div>
+          <ol class="step-list">
+            <li>
+              <strong>Download the repo.</strong>
+              Clone or download WriterDrip from GitHub.
+            </li>
+            <li>
+              <strong>Load the extension.</strong>
+              Open <code>chrome://extensions</code>, enable <code>Developer mode</code>, then click
+              <code>Load unpacked</code> and select the folder that contains <code>manifest.json</code>.
+            </li>
+            <li>
+              <strong>Open your Google Doc.</strong>
+              Click inside the document body so WriterDrip can attach to the active editor.
+            </li>
+            <li>
+              <strong>Paste, choose, and start.</strong>
+              Paste your draft, choose a duration and correction intensity, then start the drip.
+            </li>
+          </ol>
+        </section>
+
+        <section class="section faq" id="faq">
+          <div class="section-copy">
+            <p class="section-label">FAQ</p>
+            <h2>What people usually want to know first.</h2>
+          </div>
+          <div class="faq-grid">
+            <article>
+              <h3>Does WriterDrip use my Google account?</h3>
+              <p>No. WriterDrip works against the Google Doc already open in your browser and does not require OAuth.</p>
+            </article>
+            <article>
+              <h3>Does it keep running if I switch tabs?</h3>
+              <p>Yes. WriterDrip stays bound to the original Google Doc tab while you use other tabs, as long as your browser and computer stay on.</p>
+            </article>
+            <article>
+              <h3>Is WriterDrip free?</h3>
+              <p>Yes. The project is MIT-licensed, open source, and available from the public GitHub repository.</p>
+            </article>
+            <article>
+              <h3>Does it control Google Docs version history?</h3>
+              <p>No. WriterDrip types into the live editor, but Google still controls how revision history is grouped and displayed.</p>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <p>
+          WriterDrip is an independent open-source project for paced typing in Google Docs.
+        </p>
+        <p class="footer-links">
+          <a href="https://github.com/Highdrys01/WriterDrip">GitHub</a>
+          <span aria-hidden="true">·</span>
+          <a href="https://github.com/Highdrys01/WriterDrip/blob/main/README.md">README</a>
+          <span aria-hidden="true">·</span>
+          <a href="https://github.com/Highdrys01/WriterDrip/blob/main/PRIVACY.md">Privacy</a>
+        </p>
+      </footer>
+    </div>
+  </body>
+</html>
