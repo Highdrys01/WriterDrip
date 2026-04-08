@@ -20,6 +20,7 @@ Local-first, always free, and built for the Google Doc already open in your brow
 - WriterDrip only works on editable Google Docs pages.
 - Leave correction intensity on `Suggested` if you want the default behavior.
 - You can switch to other tabs while the original Google Doc tab keeps running.
+- Keep your browser open, keep the original Google Doc tab open, and keep your computer awake until the drip finishes.
 - Reload the extension from `chrome://extensions` after pulling updates from GitHub.
 
 ## Feature Tour
@@ -57,7 +58,7 @@ Local-first, always free, and built for the Google Doc already open in your brow
 
 - No Google account connection or Google Drive / Docs API integration
 - No remote server runs or cloud processing
-- No typing after the target browser or computer shuts down
+- No typing after the target browser closes, the Doc tab is closed, or the computer shuts down or sleeps
 - No control over how Google Docs groups version history entries
 - Strongest with the Google Doc the user already opened in the browser
 - Google Docs can change editor behavior without warning
