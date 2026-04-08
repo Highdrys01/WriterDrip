@@ -168,52 +168,82 @@ if (!globalThis.__writerdripRunnerLoaded) {
     }
     const CORRECTION_MODIFIERS = {
         low: {
-            chanceScale: 0.62,
-            budgetScale: 0.68,
-            budgetOffset: 0,
-            cooldownScale: 1.18,
-            immediateRepairOffset: 0.06,
-            wordBoundaryOffset: 0.05,
-            repairDepthScale: 0.9,
-            noticePauseScale: 0.96,
-            realignPauseScale: 0.95,
-            transpositionScale: 0.94,
-            doubleTapScale: 0.9,
-            casingScale: 0.92,
-            omissionScale: 0.86,
-            guaranteedMinChars: 260
+            chanceScale: 0.42,
+            budgetScale: 0.54,
+            budgetOffset: -0.15,
+            cooldownScale: 1.34,
+            immediateRepairOffset: 0.11,
+            wordBoundaryOffset: 0.1,
+            repairDepthScale: 0.78,
+            noticePauseScale: 0.92,
+            realignPauseScale: 0.92,
+            transpositionScale: 0.76,
+            doubleTapScale: 0.74,
+            casingScale: 0.72,
+            omissionScale: 0.64,
+            spacingScale: 1.24,
+            segmentBias: -1,
+            sentenceAllowanceBonus: 0,
+            wordVariantScale: 0,
+            maxWordVariantScale: 0,
+            variantMinWordCount: 999,
+            variantMinChars: 99999,
+            guaranteedMinChars: 420,
+            repairAfterExtraScale: 0.68,
+            repairHardExtraScale: 0.72,
+            wordVariantDelayScale: 0.78
         },
         medium: {
             chanceScale: 1,
             budgetScale: 1,
             budgetOffset: 0,
             cooldownScale: 1,
-            immediateRepairOffset: 0,
-            wordBoundaryOffset: 0,
-            repairDepthScale: 1,
+            immediateRepairOffset: 0.01,
+            wordBoundaryOffset: 0.02,
+            repairDepthScale: 0.98,
             noticePauseScale: 1,
             realignPauseScale: 1,
             transpositionScale: 1,
             doubleTapScale: 1,
             casingScale: 1,
             omissionScale: 1,
-            guaranteedMinChars: 150
+            spacingScale: 1,
+            segmentBias: 0,
+            sentenceAllowanceBonus: 0,
+            wordVariantScale: 0.55,
+            maxWordVariantScale: 1,
+            variantMinWordCount: 70,
+            variantMinChars: 1100,
+            guaranteedMinChars: 180,
+            repairAfterExtraScale: 1,
+            repairHardExtraScale: 1,
+            wordVariantDelayScale: 1
         },
         high: {
-            chanceScale: 1.38,
-            budgetScale: 1.35,
-            budgetOffset: 0.5,
-            cooldownScale: 0.84,
-            immediateRepairOffset: -0.04,
-            wordBoundaryOffset: -0.02,
-            repairDepthScale: 1.14,
-            noticePauseScale: 1.08,
-            realignPauseScale: 1.05,
-            transpositionScale: 1.07,
-            doubleTapScale: 1.06,
-            casingScale: 1.08,
-            omissionScale: 1.12,
-            guaranteedMinChars: 120
+            chanceScale: 1.92,
+            budgetScale: 1.68,
+            budgetOffset: 0.85,
+            cooldownScale: 0.7,
+            immediateRepairOffset: -0.09,
+            wordBoundaryOffset: -0.08,
+            repairDepthScale: 1.34,
+            noticePauseScale: 1.18,
+            realignPauseScale: 1.12,
+            transpositionScale: 1.22,
+            doubleTapScale: 1.18,
+            casingScale: 1.18,
+            omissionScale: 1.28,
+            spacingScale: 0.76,
+            segmentBias: 1,
+            sentenceAllowanceBonus: 1,
+            wordVariantScale: 1.4,
+            maxWordVariantScale: 1.8,
+            variantMinWordCount: 24,
+            variantMinChars: 260,
+            guaranteedMinChars: 95,
+            repairAfterExtraScale: 1.32,
+            repairHardExtraScale: 1.38,
+            wordVariantDelayScale: 1.26
         }
     };
 
@@ -1379,6 +1409,7 @@ if (!globalThis.__writerdripRunnerLoaded) {
         const newlineRatio = analysis.newlineRatio;
         const symbolRatio = analysis.symbolRatio;
         const looksStructured = analysis.looksStructured;
+        const suggestionScore = Number.isFinite(analysis.suggestedCorrectionScore) ? analysis.suggestedCorrectionScore : 1;
 
         const paceFactor = clamp(0.88 + (Math.min(secondsPerChar, 6) * 0.06), 0.88, 1.24);
         const technicalGuard = clamp(1 - Math.min((symbolRatio * 3.4) + (uppercaseRatio * 0.75), 0.4), 0.62, 1);
@@ -1387,6 +1418,10 @@ if (!globalThis.__writerdripRunnerLoaded) {
         const suggestedIntensity = analysis.suggestedCorrectionIntensity;
         const resolvedIntensity = requestedIntensity === 'suggested' ? suggestedIntensity : requestedIntensity;
         const intensityProfile = CORRECTION_MODIFIERS[resolvedIntensity] || CORRECTION_MODIFIERS.medium;
+        const intensityScoreCenter = resolvedIntensity === 'low' ? 0.1 : resolvedIntensity === 'medium' ? 1.45 : 2.75;
+        const suggestedStrengthBias = requestedIntensity === 'suggested'
+            ? clamp(1 + ((suggestionScore - intensityScoreCenter) * 0.1), 0.84, 1.22)
+            : 1;
 
         let maxMistakes = 0;
         if (charCount >= 90 && wordCount >= 18) {
@@ -1408,7 +1443,7 @@ if (!globalThis.__writerdripRunnerLoaded) {
             }
         }
 
-        maxMistakes = Math.round((maxMistakes * intensityProfile.budgetScale) + intensityProfile.budgetOffset);
+        maxMistakes = Math.round((maxMistakes * intensityProfile.budgetScale * suggestedStrengthBias) + intensityProfile.budgetOffset);
         if (looksStructured) {
             maxMistakes = Math.min(maxMistakes, 1);
         }
@@ -1417,21 +1452,49 @@ if (!globalThis.__writerdripRunnerLoaded) {
         }
         maxMistakes = clamp(maxMistakes, 0, resolvedIntensity === 'high' ? 6 : 5);
 
-        const baseMistakeChance = PROFILE.mistakeChance * paceFactor * technicalGuard * proseFactor * intensityProfile.chanceScale;
+        const baseMistakeChance = PROFILE.mistakeChance * paceFactor * technicalGuard * proseFactor * intensityProfile.chanceScale * suggestedStrengthBias;
         const cooldownChars = Math.round(
             PROFILE.cooldownChars *
             clamp(1.08 - ((paceFactor - 1) * 0.35) + ((technicalGuard - 0.8) * 0.2), 0.68, 1.18) *
-            intensityProfile.cooldownScale
+            intensityProfile.cooldownScale /
+            clamp(suggestedStrengthBias, 0.82, 1.2)
         );
 
         const segmentCount = clamp(
             maxMistakes <= 1
                 ? 1
-                : Math.min(resolvedIntensity === 'high' ? 4 : 3, maxMistakes + (resolvedIntensity === 'high' ? 1 : 0)),
+                : Math.min(
+                    resolvedIntensity === 'high' ? 5 : 4,
+                    maxMistakes + (resolvedIntensity === 'high' ? 1 : 0) + (intensityProfile.segmentBias || 0)
+                ),
             1,
-            4
+            5
         );
-        const sentenceRepeatAllowance = resolvedIntensity === 'high' && charCount >= 900 ? 2 : 1;
+        const sentenceRepeatAllowance = clamp(
+            (resolvedIntensity === 'high' && charCount >= 900 ? 2 : 1) + (intensityProfile.sentenceAllowanceBonus || 0),
+            1,
+            3
+        );
+        const baseSpacing = (resolvedIntensity === 'high' ? 42 : resolvedIntensity === 'low' ? 74 : 58) *
+            technicalGuard *
+            clamp(1.06 - ((paceFactor - 1) * 0.2), 0.88, 1.14) *
+            (intensityProfile.spacingScale || 1) /
+            clamp(suggestedStrengthBias, 0.84, 1.18);
+        const canUseWordVariants = !looksStructured &&
+            technicalGuard > 0.82 &&
+            averageWordLength > 4.1 &&
+            wordCount >= (intensityProfile.variantMinWordCount || 26) &&
+            charCount >= (intensityProfile.variantMinChars || 0);
+        const baseWordVariantChance = canUseWordVariants
+            ? ((resolvedIntensity === 'high' ? 0.18 : resolvedIntensity === 'medium' ? 0.08 : 0.02) *
+                (intensityProfile.wordVariantScale || 0) *
+                clamp(suggestedStrengthBias, 0.84, 1.22))
+            : 0;
+        const baseMaxWordVariants = canUseWordVariants
+            ? (resolvedIntensity === 'high'
+                ? (charCount >= 1400 ? 2 : 1)
+                : (resolvedIntensity === 'medium' && charCount >= 1300 ? 1 : 0))
+            : 0;
 
         return {
             charCount,
@@ -1444,21 +1507,18 @@ if (!globalThis.__writerdripRunnerLoaded) {
             requestedIntensity,
             suggestedIntensity,
             resolvedIntensity,
+            suggestedStrengthBias,
             looksStructured,
             baseMistakeChance,
             cooldownChars,
             maxMistakes,
             segmentCount,
             segmentBudgets: buildSegmentBudgets(segmentCount, maxMistakes),
-            minMistakeSpacingChars: Math.round(clamp((resolvedIntensity === 'high' ? 42 : resolvedIntensity === 'low' ? 74 : 58) * technicalGuard * clamp(1.06 - ((paceFactor - 1) * 0.2), 0.88, 1.14), 24, 96)),
+            minMistakeSpacingChars: Math.round(clamp(baseSpacing, 22, 108)),
             edgeGuardRatio: resolvedIntensity === 'high' ? 0.05 : resolvedIntensity === 'low' ? 0.1 : 0.075,
             sentenceRepeatAllowance,
-            wordVariantChance: (!looksStructured && technicalGuard > 0.82 && averageWordLength > 4.1 && wordCount >= 26)
-                ? (resolvedIntensity === 'high' ? 0.16 : (resolvedIntensity === 'medium' && charCount >= 1300 ? 0.07 : 0))
-                : 0,
-            maxWordVariantMistakes: (!looksStructured && wordCount >= 26)
-                ? (resolvedIntensity === 'high' ? (charCount >= 1800 ? 2 : 1) : (resolvedIntensity === 'medium' && charCount >= 1500 ? 1 : 0))
-                : 0,
+            wordVariantChance: clamp(baseWordVariantChance, 0, resolvedIntensity === 'high' ? 0.28 : resolvedIntensity === 'medium' ? 0.12 : 0.03),
+            maxWordVariantMistakes: Math.round(baseMaxWordVariants * (intensityProfile.maxWordVariantScale || 1)),
             guaranteedMistakeAllowed: maxMistakes > 0 && charCount > intensityProfile.guaranteedMinChars && !looksStructured,
             transpositionChance: clamp((PROFILE.transpositionChance + (averageWordLength > 5.4 ? 0.04 : 0) - (symbolRatio * 0.2)) * intensityProfile.transpositionScale, 0.1, 0.3),
             doubleTapChance: clamp((PROFILE.doubleTapChance + (paceFactor < 0.95 ? 0.03 : 0)) * intensityProfile.doubleTapScale, 0.06, 0.18),
@@ -1468,7 +1528,10 @@ if (!globalThis.__writerdripRunnerLoaded) {
             preferWordBoundaryChance: clamp(0.48 + ((proseFactor - 1) * 0.5) + intensityProfile.wordBoundaryOffset, 0.36, 0.72),
             repairDepthFactor: clamp((0.45 + ((paceFactor - 1) * 0.3) + ((proseFactor - 1) * 0.4)) * intensityProfile.repairDepthScale, 0.34, 0.84),
             noticePauseFactor: clamp((0.95 + ((paceFactor - 1) * 0.45)) * intensityProfile.noticePauseScale, 0.86, 1.24),
-            realignPauseFactor: clamp((0.92 + ((paceFactor - 1) * 0.28)) * intensityProfile.realignPauseScale, 0.86, 1.16)
+            realignPauseFactor: clamp((0.92 + ((paceFactor - 1) * 0.28)) * intensityProfile.realignPauseScale, 0.86, 1.16),
+            repairAfterExtraScale: intensityProfile.repairAfterExtraScale || 1,
+            repairHardExtraScale: intensityProfile.repairHardExtraScale || 1,
+            wordVariantDelayScale: intensityProfile.wordVariantDelayScale || 1
         };
     }
 
@@ -1830,14 +1893,23 @@ if (!globalThis.__writerdripRunnerLoaded) {
         const immediateRepair = rng() < draftProfile.immediateRepairChance;
         const preferWordBoundary = !immediateRepair && context.remainingInWord > 1 && rng() < draftProfile.preferWordBoundaryChance;
         const repairSpanLimit = Math.max(1, Math.min(context.remainingInWord, Math.round(1 + (context.remainingInWord * draftProfile.repairDepthFactor))));
+        const immediateRepairBase = Math.max(1, Math.round((1 + Math.floor(rng() * 2)) * draftProfile.repairAfterExtraScale));
+        const boundaryRepairBase = Math.max(
+            1,
+            Math.round((repairSpanLimit + (rng() < 0.35 ? 1 : 0)) * draftProfile.repairAfterExtraScale)
+        );
+        const delayedRepairBase = Math.max(1, Math.round((2 + Math.floor(rng() * 3)) * draftProfile.repairAfterExtraScale));
         const repairAfterExtraChars = immediateRepair
-            ? Math.min(repairSpanLimit, 1 + Math.floor(rng() * 2))
+            ? Math.min(repairSpanLimit, immediateRepairBase)
             : preferWordBoundary
-                ? Math.max(1, Math.min(context.remainingInWord, repairSpanLimit + (rng() < 0.35 ? 1 : 0)))
-                : Math.min(repairSpanLimit, 2 + Math.floor(rng() * 3));
+                ? Math.max(1, Math.min(context.remainingInWord, boundaryRepairBase))
+                : Math.min(repairSpanLimit, delayedRepairBase);
         const hardExtraChars = Math.max(
             repairAfterExtraChars + 1,
-            Math.min(context.remainingInWord + 1, repairAfterExtraChars + 1 + Math.floor(rng() * 2))
+            Math.min(
+                context.remainingInWord + 1,
+                repairAfterExtraChars + 1 + Math.max(1, Math.round((1 + Math.floor(rng() * 2)) * draftProfile.repairHardExtraScale))
+            )
         );
         const plan = {
             outputs: [],
@@ -1927,13 +1999,13 @@ if (!globalThis.__writerdripRunnerLoaded) {
 
         const repairAfterExtraChars = Math.min(
             Math.max(1, context.wordLength + Math.floor(rng() * 2)),
-            context.wordLength + 2
+            Math.max(1, Math.round((context.wordLength + 2) * draftProfile.repairAfterExtraScale))
         );
         return {
             outputs,
             initialMistakenChars: replacementChars.length,
             indexAdvance: context.wordLength - 1,
-            cooldownChars: Math.max(56, draftProfile.cooldownChars + 12 + Math.floor(rng() * 18)),
+            cooldownChars: Math.max(56, Math.round((draftProfile.cooldownChars + 12 + Math.floor(rng() * 18)) * draftProfile.wordVariantDelayScale)),
             pendingFix: {
                 position: index,
                 type: 'word-variant',
@@ -1941,7 +2013,7 @@ if (!globalThis.__writerdripRunnerLoaded) {
                 repairMode: 'full-retype',
                 initialMistakenChars: replacementChars.length,
                 repairAfterExtraChars,
-                hardExtraChars: repairAfterExtraChars + 1 + Math.floor(rng() * 2),
+                hardExtraChars: repairAfterExtraChars + Math.max(1, Math.round((1 + Math.floor(rng() * 2)) * draftProfile.repairHardExtraScale)),
                 preferWordBoundary: true,
                 backspaceCount: replacementChars.length,
                 replacementChars: Array.from(context.originalWord),

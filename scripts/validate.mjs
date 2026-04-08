@@ -209,6 +209,54 @@ async function validatePlanner() {
     const longDraftAnalysis = shared.analyzeDraftText(scenarios[1].text, scenarios[1].durationMins);
     assert.equal(longDraftAnalysis.suggestedCorrectionIntensity, 'high', 'Long relaxed prose should suggest high correction intensity.');
     assert.ok(longDraftAnalysis.suggestedCorrectionSignals.length > 0, 'Suggested intensity should include explanation signals for longer prose.');
+
+    const longChars = Array.from(scenarios[1].text);
+    const lowProfile = hooks.buildDraftMistakeProfile(longChars, scenarios[1].durationMins * 60, 'low');
+    const mediumProfile = hooks.buildDraftMistakeProfile(longChars, scenarios[1].durationMins * 60, 'medium');
+    const highProfile = hooks.buildDraftMistakeProfile(longChars, scenarios[1].durationMins * 60, 'high');
+
+    assert.ok(lowProfile.maxMistakes < mediumProfile.maxMistakes, 'Low intensity should budget fewer mistakes than medium on long prose.');
+    assert.ok(mediumProfile.maxMistakes < highProfile.maxMistakes, 'High intensity should budget more mistakes than medium on long prose.');
+    assert.ok(lowProfile.cooldownChars > mediumProfile.cooldownChars, 'Low intensity should space mistakes farther apart than medium.');
+    assert.ok(mediumProfile.cooldownChars > highProfile.cooldownChars, 'High intensity should allow tighter spacing than medium.');
+    assert.equal(lowProfile.wordVariantChance, 0, 'Low intensity should disable larger word-level variants.');
+    assert.ok(highProfile.wordVariantChance > mediumProfile.wordVariantChance, 'High intensity should allow stronger word-level variant behavior than medium.');
+    assert.ok(highProfile.repairDepthFactor > mediumProfile.repairDepthFactor, 'High intensity should allow deeper repairs than medium.');
+    assert.ok(mediumProfile.repairDepthFactor > lowProfile.repairDepthFactor, 'Medium intensity should allow deeper repairs than low.');
+
+    const intensityAverages = {
+        low: { repairs: 0, variants: 0, backspaces: 0 },
+        medium: { repairs: 0, variants: 0, backspaces: 0 },
+        high: { repairs: 0, variants: 0, backspaces: 0 }
+    };
+    for (let seed = 1; seed <= 30; seed += 1) {
+        for (const intensity of ['low', 'medium', 'high']) {
+            const actions = hooks.buildActionPlan(scenarios[1].text, scenarios[1].durationMins * 60, seed, intensity);
+            intensityAverages[intensity].repairs += actions.filter((action) => action?.kind === 'repair-pause').length;
+            intensityAverages[intensity].variants += actions.filter((action) => action?.kind === 'word-variant-output').length;
+            intensityAverages[intensity].backspaces += actions.filter((action) => action?.kind === 'repair-backspace').length;
+        }
+    }
+
+    assert.ok(intensityAverages.low.repairs < intensityAverages.medium.repairs, 'Low intensity should schedule fewer repair sequences than medium.');
+    assert.ok(intensityAverages.medium.repairs < intensityAverages.high.repairs, 'High intensity should schedule more repair sequences than medium.');
+    assert.ok(intensityAverages.low.backspaces < intensityAverages.medium.backspaces, 'Low intensity should create shallower repairs than medium.');
+    assert.ok(intensityAverages.medium.backspaces < intensityAverages.high.backspaces, 'High intensity should create deeper repairs than medium.');
+    const variantHeavyText = `${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText}`;
+    const variantAverages = {
+        low: 0,
+        medium: 0,
+        high: 0
+    };
+    for (let seed = 1; seed <= 30; seed += 1) {
+        for (const intensity of ['low', 'medium', 'high']) {
+            const actions = hooks.buildActionPlan(variantHeavyText, 420 * 60, seed, intensity);
+            variantAverages[intensity] += actions.filter((action) => action?.kind === 'word-variant-output').length;
+        }
+    }
+
+    assert.equal(variantAverages.low, 0, 'Low intensity should keep larger word-level variants disabled.');
+    assert.ok(variantAverages.high > variantAverages.medium, 'High intensity should trigger more word-level variant outputs than medium on confusable-heavy prose.');
 }
 
 function createBackgroundSandbox() {
