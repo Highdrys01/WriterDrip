@@ -816,7 +816,7 @@ function updateCorrectionUi() {
     if (!hasDraft) {
         if (normalizedSelection === 'suggested') {
             correctionMeta.innerText = 'Suggested';
-            correctionHint.innerText = 'Suggested adapts correction frequency to the current draft.';
+            correctionHint.innerText = 'Suggested adapts to draft length, structure, and pacing once you add text.';
         } else {
             correctionMeta.innerText = `Using ${formatCorrectionIntensity(effectiveIntensity)}`;
             correctionHint.innerText = `${buildCorrectionModeDescription(effectiveIntensity)} Add a draft to see the suggested level.`;
@@ -826,15 +826,19 @@ function updateCorrectionUi() {
 
     if (normalizedSelection === 'suggested') {
         correctionMeta.innerText = `Suggested: ${formatCorrectionIntensity(effectiveIntensity)}`;
-        correctionHint.innerText = buildSuggestedCorrectionHint(effectiveIntensity);
+        correctionHint.innerText = buildSuggestedCorrectionHint(draftAnalysis, effectiveIntensity);
         return;
     }
 
     correctionMeta.innerText = `Using ${formatCorrectionIntensity(effectiveIntensity)}`;
-    correctionHint.innerText = `${buildCorrectionModeDescription(effectiveIntensity)} Suggested for this draft: ${formatCorrectionIntensity(suggestedIntensity)}.`;
+    correctionHint.innerText = `${buildCorrectionModeDescription(effectiveIntensity)} Suggested for this draft: ${formatCorrectionIntensity(suggestedIntensity)}. ${draftAnalysis.suggestedCorrectionReason || ''}`.trim();
 }
 
-function buildSuggestedCorrectionHint(intensity) {
+function buildSuggestedCorrectionHint(draftAnalysis, intensity) {
+    if (draftAnalysis?.suggestedCorrectionReason) {
+        return draftAnalysis.suggestedCorrectionReason;
+    }
+
     if (intensity === 'low') {
         return 'Suggested keeps corrections subtle for short, technical, or tightly structured drafts.';
     }

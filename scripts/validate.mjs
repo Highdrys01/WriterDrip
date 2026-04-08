@@ -194,9 +194,21 @@ async function validatePlanner() {
 
     const structuredDraftAnalysis = shared.analyzeDraftText('HTTP_STATUS=200\nCONFIG={READY:true}', 30);
     assert.equal(structuredDraftAnalysis.suggestedCorrectionIntensity, 'low', 'Structured drafts should suggest low correction intensity.');
+    assert.match(structuredDraftAnalysis.suggestedCorrectionReason, /structured|technical/i, 'Structured drafts should explain why the suggestion stayed low.');
+
+    const shortDraftAnalysis = shared.analyzeDraftText('Quick note to finish tonight.', 5);
+    assert.equal(shortDraftAnalysis.suggestedCorrectionIntensity, 'low', 'Very short drafts should stay on low suggestion.');
+    assert.match(shortDraftAnalysis.suggestedCorrectionReason, /short/i, 'Short drafts should explain that they are too short for stronger correction behavior.');
+
+    const balancedDraftAnalysis = shared.analyzeDraftText(
+        'This draft is long enough to feel like normal prose, but it is not massive. It has a few sentences, some commas, and a steady rhythm throughout the paragraph.',
+        60
+    );
+    assert.equal(balancedDraftAnalysis.suggestedCorrectionIntensity, 'medium', 'Balanced prose should land on medium suggestion.');
 
     const longDraftAnalysis = shared.analyzeDraftText(scenarios[1].text, scenarios[1].durationMins);
-    assert.notEqual(longDraftAnalysis.suggestedCorrectionIntensity, 'low', 'Long prose should not collapse to low correction intensity by default.');
+    assert.equal(longDraftAnalysis.suggestedCorrectionIntensity, 'high', 'Long relaxed prose should suggest high correction intensity.');
+    assert.ok(longDraftAnalysis.suggestedCorrectionSignals.length > 0, 'Suggested intensity should include explanation signals for longer prose.');
 }
 
 function createBackgroundSandbox() {
