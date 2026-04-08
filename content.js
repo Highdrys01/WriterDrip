@@ -44,6 +44,42 @@ if (!globalThis.__writerdripRunnerLoaded) {
         omissionChance: 0.14,
         cooldownChars: 100
     };
+    const CONNECTIVE_PAUSE_WORDS = new Set([
+        'although',
+        'because',
+        'besides',
+        'finally',
+        'however',
+        'instead',
+        'meanwhile',
+        'otherwise',
+        'overall',
+        'perhaps',
+        'rather',
+        'still',
+        'therefore',
+        'though',
+        'while'
+    ]);
+    const VOWEL_SLIP_MAP = Object.freeze({
+        a: 'eo',
+        e: 'ai',
+        i: 'ou',
+        o: 'iu',
+        u: 'io'
+    });
+    const SOFT_SLIP_MAP = Object.freeze({
+        c: 'sx',
+        d: 'sf',
+        g: 'fh',
+        l: 'ko',
+        m: 'n',
+        n: 'm',
+        p: 'o',
+        r: 'et',
+        t: 'ry',
+        y: 'tu'
+    });
     const WORD_VARIANT_MAP = createWordVariantMap([
         ['accept', 'except'],
         ['advice', 'advise'],
@@ -188,6 +224,9 @@ if (!globalThis.__writerdripRunnerLoaded) {
             maxWordVariantScale: 0,
             variantMinWordCount: 999,
             variantMinChars: 99999,
+            keyboardSlipScale: 0.82,
+            vowelSlipScale: 0.44,
+            softSlipScale: 0.22,
             guaranteedMinChars: 420,
             repairAfterExtraScale: 0.68,
             repairHardExtraScale: 0.72,
@@ -214,6 +253,9 @@ if (!globalThis.__writerdripRunnerLoaded) {
             maxWordVariantScale: 1,
             variantMinWordCount: 70,
             variantMinChars: 1100,
+            keyboardSlipScale: 1,
+            vowelSlipScale: 0.92,
+            softSlipScale: 0.55,
             guaranteedMinChars: 180,
             repairAfterExtraScale: 1,
             repairHardExtraScale: 1,
@@ -240,6 +282,9 @@ if (!globalThis.__writerdripRunnerLoaded) {
             maxWordVariantScale: 1.8,
             variantMinWordCount: 24,
             variantMinChars: 260,
+            keyboardSlipScale: 1.14,
+            vowelSlipScale: 1.42,
+            softSlipScale: 1.05,
             guaranteedMinChars: 95,
             repairAfterExtraScale: 1.32,
             repairHardExtraScale: 1.38,
@@ -1315,9 +1360,9 @@ if (!globalThis.__writerdripRunnerLoaded) {
             const char = chars[index];
             const progress = index / Math.max(1, chars.length - 1);
             const fatigueMultiplier = 1 + (0.35 * (index / Math.max(1, chars.length)));
-            const cadenceMultiplier = getCadenceMultiplier(progress, sentenceLength, char, rng);
+            const cadenceMultiplier = getCadenceMultiplier(progress, sentenceLength, char, rng, draftProfile.cadenceProfile);
             const baseDelay = (0.07 + rng() * 0.06) * fatigueMultiplier * cadenceMultiplier;
-            const distributionWeight = getDistributionWeight(char, progress, sentenceLength);
+            const distributionWeight = getDistributionWeight(char, progress, sentenceLength, draftProfile.cadenceProfile);
             const canFixAtBoundary = char === '\n' || ['.', '!', '?', ' '].includes(char);
             const wordVariantContext = getWordVariantContext(chars, index, draftProfile, plannerState);
             const mistakeContext = wordVariantContext || getMistypeContext(chars, index);
@@ -1386,7 +1431,7 @@ if (!globalThis.__writerdripRunnerLoaded) {
             index += 1;
         }
 
-        const pacedActions = applyCadencePlan(actions, rng);
+        const pacedActions = applyCadencePlan(actions, rng, draftProfile.cadenceProfile);
         distributeDelays(pacedActions, targetDurationSeconds);
         const validation = validateActionPlan(text, draftProfile, pacedActions);
         if (validation.ok) {
@@ -1524,6 +1569,9 @@ if (!globalThis.__writerdripRunnerLoaded) {
             doubleTapChance: clamp((PROFILE.doubleTapChance + (paceFactor < 0.95 ? 0.03 : 0)) * intensityProfile.doubleTapScale, 0.06, 0.18),
             casingErrorChance: clamp((PROFILE.casingErrorChance * technicalGuard * (1 - Math.min(uppercaseRatio * 0.7, 0.5))) * intensityProfile.casingScale, 0.02, 0.1),
             omissionChance: clamp((PROFILE.omissionChance * proseFactor * clamp(averageWordLength / 5.1, 0.82, 1.12)) * intensityProfile.omissionScale, 0.07, 0.24),
+            keyboardSlipChance: clamp((0.22 + (averageWordLength > 4.5 ? 0.03 : 0)) * (intensityProfile.keyboardSlipScale || 1), 0.08, 0.38),
+            vowelSlipChance: clamp((0.1 + (averageWordLength > 4.8 ? 0.03 : 0) + (proseFactor > 1.02 ? 0.02 : 0)) * (intensityProfile.vowelSlipScale || 1), 0.03, 0.24),
+            softSlipChance: clamp((0.06 + (wordCount >= 40 ? 0.02 : 0)) * technicalGuard * (intensityProfile.softSlipScale || 1), 0.01, 0.18),
             immediateRepairChance: clamp(0.34 - ((paceFactor - 1) * 0.18) + intensityProfile.immediateRepairOffset, 0.14, 0.44),
             preferWordBoundaryChance: clamp(0.48 + ((proseFactor - 1) * 0.5) + intensityProfile.wordBoundaryOffset, 0.36, 0.72),
             repairDepthFactor: clamp((0.45 + ((paceFactor - 1) * 0.3) + ((proseFactor - 1) * 0.4)) * intensityProfile.repairDepthScale, 0.34, 0.84),
@@ -1531,7 +1579,8 @@ if (!globalThis.__writerdripRunnerLoaded) {
             realignPauseFactor: clamp((0.92 + ((paceFactor - 1) * 0.28)) * intensityProfile.realignPauseScale, 0.86, 1.16),
             repairAfterExtraScale: intensityProfile.repairAfterExtraScale || 1,
             repairHardExtraScale: intensityProfile.repairHardExtraScale || 1,
-            wordVariantDelayScale: intensityProfile.wordVariantDelayScale || 1
+            wordVariantDelayScale: intensityProfile.wordVariantDelayScale || 1,
+            cadenceProfile: buildCadenceProfile(analysis, targetDurationSeconds)
         };
     }
 
@@ -1546,9 +1595,9 @@ if (!globalThis.__writerdripRunnerLoaded) {
             const char = chars[index];
             const progress = index / Math.max(1, chars.length - 1);
             const fatigueMultiplier = 1 + (0.35 * (index / Math.max(1, chars.length)));
-            const cadenceMultiplier = getCadenceMultiplier(progress, sentenceLength, char, rng);
+            const cadenceMultiplier = getCadenceMultiplier(progress, sentenceLength, char, rng, profile.cadenceProfile);
             const baseDelay = (0.07 + rng() * 0.06) * fatigueMultiplier * cadenceMultiplier;
-            const distributionWeight = getDistributionWeight(char, progress, sentenceLength);
+            const distributionWeight = getDistributionWeight(char, progress, sentenceLength, profile.cadenceProfile);
 
             actions.push({
                 char,
@@ -1563,7 +1612,7 @@ if (!globalThis.__writerdripRunnerLoaded) {
             }
         }
 
-        const pacedActions = applyCadencePlan(actions, rng);
+        const pacedActions = applyCadencePlan(actions, rng, profile.cadenceProfile);
         distributeDelays(pacedActions, targetDurationSeconds);
         return pacedActions;
     }
@@ -1630,6 +1679,143 @@ if (!globalThis.__writerdripRunnerLoaded) {
             remaining -= 1;
         }
         return budgets;
+    }
+
+    function buildCadenceProfile(analysis, targetDurationSeconds) {
+        const charCount = analysis.charCount || 0;
+        const relaxedSession = analysis.secondsPerChar >= 3.2;
+        const veryRelaxedSession = analysis.secondsPerChar >= 5.4;
+        const paragraphHeavy = (analysis.paragraphCount || 0) >= 3 || analysis.newlineRatio >= 0.012;
+        const sentenceHeavy = (analysis.sentenceCount || 0) >= 5;
+        const averageSentenceWords = analysis.averageSentenceWordCount || 0;
+        const punctuationDensity = analysis.punctuationRatio || 0;
+        const longForm = charCount >= 900;
+
+        return {
+            warmupStrength: clamp(0.18 + (veryRelaxedSession ? 0.08 : relaxedSession ? 0.04 : 0), 0.16, 0.34),
+            cooldownStrength: clamp(0.14 + (longForm ? 0.06 : 0) + (veryRelaxedSession ? 0.05 : 0), 0.14, 0.3),
+            waveStrength: clamp(0.045 + (longForm ? 0.02 : 0), 0.04, 0.08),
+            waveCycles: longForm ? 7 : 5,
+            sentenceRampStart: averageSentenceWords >= 14 ? 12 : 16,
+            sentenceRamp: clamp(0.0048 + (averageSentenceWords * 0.00018), 0.0045, 0.0092),
+            sentenceRampCap: clamp(0.12 + (averageSentenceWords * 0.01), 0.12, 0.28),
+            newlineBoost: paragraphHeavy ? 0.46 : 0.34,
+            sentencePunctuationBoost: sentenceHeavy ? 0.2 : 0.16,
+            clausePunctuationBoost: punctuationDensity >= 0.04 ? 0.1 : 0.075,
+            jitterRange: relaxedSession ? 0.055 : 0.075,
+            minimumMultiplier: 0.7,
+            clausePauseBase: relaxedSession ? 0.34 : 0.26,
+            clausePauseSpread: relaxedSession ? 0.3 : 0.22,
+            clauseWeightBase: 1.25,
+            burstPauseBase: veryRelaxedSession ? 0.96 : relaxedSession ? 0.82 : 0.7,
+            burstPauseSpread: veryRelaxedSession ? 1.08 : 0.9,
+            burstWeightBase: 2.6,
+            sentencePauseBase: veryRelaxedSession ? 1.28 : relaxedSession ? 1.14 : 0.98,
+            sentencePauseSpread: longForm ? 1.3 : 1.08,
+            sentenceWeightBase: 3.35,
+            paragraphPauseBase: paragraphHeavy ? 1.75 : 1.48,
+            paragraphPauseSpread: paragraphHeavy ? 1.78 : 1.42,
+            paragraphWeightBase: 4.8,
+            paragraphBlockPauseBase: paragraphHeavy ? 2.65 : 2.3,
+            paragraphBlockPauseSpread: paragraphHeavy ? 2.35 : 1.95,
+            paragraphBlockWeightBase: 6.5,
+            microPauseBase: veryRelaxedSession ? 0.22 : 0.16,
+            microPauseSpread: 0.18,
+            thoughtPauseBase: veryRelaxedSession ? 0.52 : 0.4,
+            thoughtPauseSpread: 0.34,
+            clausePauseChance: clamp(0.34 + (punctuationDensity * 2.8) + (averageSentenceWords > 14 ? 0.06 : 0), 0.26, 0.72),
+            connectivePauseChance: clamp(0.18 + (relaxedSession ? 0.08 : 0) + (longForm ? 0.06 : 0), 0.14, 0.42),
+            longWordPauseChance: clamp(0.08 + ((analysis.longWordRatio || 0) * 0.45) + (relaxedSession ? 0.04 : 0), 0.06, 0.24),
+            sentenceDriftPauseChance: clamp(0.06 + (averageSentenceWords > 15 ? 0.06 : 0) + (veryRelaxedSession ? 0.04 : 0), 0.04, 0.22),
+            longWordThreshold: analysis.averageWordLength >= 5.2 ? 7 : 8,
+            afterBoundaryBurstMin: longForm ? 20 : 24,
+            afterBoundaryBurstMax: relaxedSession ? 46 : 38,
+            midBurstMin: relaxedSession ? 28 : 36,
+            midBurstMax: veryRelaxedSession ? 86 : longForm ? 76 : 66,
+            distributionSentenceLift: 0.015,
+            distributionSentenceCap: 0.4,
+            edgeDistributionBoost: 0.18
+        };
+    }
+
+    function getDefaultCadenceProfile() {
+        return {
+            warmupStrength: 0.24,
+            cooldownStrength: 0.18,
+            waveStrength: 0.06,
+            waveCycles: 6,
+            sentenceRampStart: 18,
+            sentenceRamp: 0.006,
+            sentenceRampCap: 0.12,
+            newlineBoost: 0.35,
+            sentencePunctuationBoost: 0.16,
+            clausePunctuationBoost: 0.08,
+            jitterRange: 0.08,
+            minimumMultiplier: 0.72,
+            clausePauseBase: 0.28,
+            clausePauseSpread: 0.24,
+            clauseWeightBase: 1.2,
+            burstPauseBase: 0.75,
+            burstPauseSpread: 0.95,
+            burstWeightBase: 2.6,
+            sentencePauseBase: 1.05,
+            sentencePauseSpread: 1.15,
+            sentenceWeightBase: 3.3,
+            paragraphPauseBase: 1.45,
+            paragraphPauseSpread: 1.55,
+            paragraphWeightBase: 4.7,
+            paragraphBlockPauseBase: 2.35,
+            paragraphBlockPauseSpread: 2.1,
+            paragraphBlockWeightBase: 6.4,
+            microPauseBase: 0.16,
+            microPauseSpread: 0.16,
+            thoughtPauseBase: 0.4,
+            thoughtPauseSpread: 0.3,
+            clausePauseChance: 0.55,
+            connectivePauseChance: 0.22,
+            longWordPauseChance: 0.12,
+            sentenceDriftPauseChance: 0.08,
+            longWordThreshold: 8,
+            afterBoundaryBurstMin: 24,
+            afterBoundaryBurstMax: 56,
+            midBurstMin: 40,
+            midBurstMax: 112,
+            distributionSentenceLift: 0.015,
+            distributionSentenceCap: 0.4,
+            edgeDistributionBoost: 0.18
+        };
+    }
+
+    function getClausePauseChance(cadenceProfile, sentenceChars) {
+        return clamp(
+            cadenceProfile.clausePauseChance + Math.min(Math.max(sentenceChars - 18, 0) * 0.007, 0.16),
+            0.24,
+            0.86
+        );
+    }
+
+    function getWordPauseKind(word, rng, context, cadenceProfile) {
+        if (!word) {
+            return null;
+        }
+
+        if (CONNECTIVE_PAUSE_WORDS.has(word) && context.sentenceChars >= 10 && rng() < cadenceProfile.connectivePauseChance) {
+            return 'thought';
+        }
+
+        if (word.length >= cadenceProfile.longWordThreshold &&
+            context.wordsSincePause >= 3 &&
+            rng() < cadenceProfile.longWordPauseChance) {
+            return 'micro-word';
+        }
+
+        if (context.sentenceChars >= 26 &&
+            context.wordsSincePause >= 5 &&
+            rng() < cadenceProfile.sentenceDriftPauseChance) {
+            return 'micro-word';
+        }
+
+        return null;
     }
 
     function createMistakePlannerState(chars, draftProfile) {
@@ -1930,8 +2116,14 @@ if (!globalThis.__writerdripRunnerLoaded) {
         const variation = pickMistakeVariation(rng, plannerState);
         const canTranspose = isWordCharacter(nextChar);
         const canCaseSwap = char !== char.toLowerCase() || char !== char.toUpperCase();
+        const transThreshold = draftProfile.transpositionChance;
+        const doubleThreshold = transThreshold + draftProfile.doubleTapChance;
+        const caseThreshold = doubleThreshold + draftProfile.casingErrorChance;
+        const omissionThreshold = caseThreshold + draftProfile.omissionChance;
+        const vowelThreshold = omissionThreshold + draftProfile.vowelSlipChance;
+        const softThreshold = vowelThreshold + draftProfile.softSlipChance;
 
-        if (variation < draftProfile.transpositionChance && canTranspose) {
+        if (variation < transThreshold && canTranspose) {
             plan.outputs.push({
                 char: nextChar,
                 delay: baseDelay,
@@ -1945,7 +2137,7 @@ if (!globalThis.__writerdripRunnerLoaded) {
             plan.initialMistakenChars = 2;
             plan.indexAdvance = 1;
             plan.pendingFix.type = 'trans';
-        } else if (variation < draftProfile.transpositionChance + draftProfile.doubleTapChance) {
+        } else if (variation < doubleThreshold) {
             plan.outputs.push({
                 char,
                 delay: baseDelay,
@@ -1958,7 +2150,7 @@ if (!globalThis.__writerdripRunnerLoaded) {
             });
             plan.initialMistakenChars = 2;
             plan.pendingFix.type = 'double';
-        } else if (variation < draftProfile.transpositionChance + draftProfile.doubleTapChance + draftProfile.casingErrorChance && canCaseSwap) {
+        } else if (variation < caseThreshold && canCaseSwap) {
             const wrongCase = char === char.toUpperCase() ? char.toLowerCase() : char.toUpperCase();
             plan.outputs.push({
                 char: wrongCase,
@@ -1967,10 +2159,28 @@ if (!globalThis.__writerdripRunnerLoaded) {
             });
             plan.initialMistakenChars = 1;
             plan.pendingFix.type = 'case';
-        } else if (variation < draftProfile.transpositionChance + draftProfile.doubleTapChance + draftProfile.casingErrorChance + draftProfile.omissionChance) {
+        } else if (variation < omissionThreshold) {
             plan.pendingFix.type = 'omit';
             plan.pendingFix.noticePause += 0.08;
             plan.pendingFix.realignPause += 0.04;
+        } else if (variation < vowelThreshold) {
+            plan.outputs.push({
+                char: getVowelSlip(char, rng),
+                delay: baseDelay,
+                distributionWeight: 0.78
+            });
+            plan.initialMistakenChars = 1;
+            plan.pendingFix.type = 'vowel';
+            plan.pendingFix.noticePause += 0.03;
+        } else if (variation < softThreshold) {
+            plan.outputs.push({
+                char: getSoftSlip(char, rng),
+                delay: baseDelay,
+                distributionWeight: 0.8
+            });
+            plan.initialMistakenChars = 1;
+            plan.pendingFix.type = 'soft';
+            plan.pendingFix.noticePause += 0.02;
         } else {
             plan.outputs.push({
                 char: getAdjacentKey(char, rng),
@@ -1978,7 +2188,7 @@ if (!globalThis.__writerdripRunnerLoaded) {
                 distributionWeight: 0.8
             });
             plan.initialMistakenChars = 1;
-            plan.pendingFix.type = 'typo';
+            plan.pendingFix.type = 'key';
         }
 
         plan.pendingFix.initialMistakenChars = plan.initialMistakenChars;
@@ -2033,7 +2243,10 @@ if (!globalThis.__writerdripRunnerLoaded) {
         if ((lastType === 'trans' && base < 0.18) ||
             (lastType === 'double' && base >= 0.18 && base < 0.28) ||
             (lastType === 'case' && base >= 0.28 && base < 0.36) ||
-            (lastType === 'omit' && base >= 0.36 && base < 0.5)) {
+            (lastType === 'omit' && base >= 0.36 && base < 0.5) ||
+            (lastType === 'vowel' && base >= 0.5 && base < 0.68) ||
+            (lastType === 'soft' && base >= 0.68 && base < 0.82) ||
+            (lastType === 'key' && base >= 0.82)) {
             return clamp(base + 0.19 + (rng() * 0.21), 0, 0.99);
         }
 
@@ -2065,88 +2278,164 @@ if (!globalThis.__writerdripRunnerLoaded) {
         }
     }
 
-    function getCadenceMultiplier(progress, sentenceLength, char, rng) {
+    function getCadenceMultiplier(progress, sentenceLength, char, rng, cadenceProfile = null) {
+        const profile = cadenceProfile || getDefaultCadenceProfile();
         let multiplier = 1;
 
         if (progress < 0.08) {
-            multiplier += 0.28 * (1 - (progress / 0.08));
+            multiplier += profile.warmupStrength * (1 - (progress / 0.08));
         } else if (progress > 0.9) {
-            multiplier += 0.18 * ((progress - 0.9) / 0.1);
+            multiplier += profile.cooldownStrength * ((progress - 0.9) / 0.1);
         }
 
-        multiplier += 0.06 * Math.sin(progress * Math.PI * 6);
-        multiplier += Math.min(Math.max(sentenceLength - 18, 0) * 0.006, 0.12);
+        multiplier += profile.waveStrength * Math.sin(progress * Math.PI * profile.waveCycles);
+        multiplier += Math.min(Math.max(sentenceLength - profile.sentenceRampStart, 0) * profile.sentenceRamp, profile.sentenceRampCap);
 
         if (char === '\n') {
-            multiplier += 0.35;
+            multiplier += profile.newlineBoost;
         } else if (['.', '!', '?'].includes(char)) {
-            multiplier += 0.16;
+            multiplier += profile.sentencePunctuationBoost;
         } else if ([',', ';', ':'].includes(char)) {
-            multiplier += 0.08;
+            multiplier += profile.clausePunctuationBoost;
         }
 
-        multiplier += (rng() - 0.5) * 0.08;
-        return Math.max(0.72, multiplier);
+        multiplier += (rng() - 0.5) * profile.jitterRange;
+        return Math.max(profile.minimumMultiplier, multiplier);
     }
 
-    function applyCadencePlan(actions, rng) {
+    function applyCadencePlan(actions, rng, cadenceProfile = null) {
         if (!actions.length) {
             return actions;
         }
 
+        const profile = cadenceProfile || getDefaultCadenceProfile();
         const paced = [];
         let burstChars = 0;
         let sentenceChars = 0;
         let lastVisibleChar = '';
-        let burstTarget = nextBurstTarget(rng, true);
+        let currentWord = '';
+        let wordsSincePause = 0;
+        let charsSincePause = 0;
+        let burstTarget = nextBurstTarget(rng, true, profile);
 
         for (const action of actions) {
             paced.push(action);
 
             if (action.char === null) {
                 burstChars = 0;
-                burstTarget = nextBurstTarget(rng, true);
+                sentenceChars = Math.max(0, sentenceChars - 2);
+                wordsSincePause = 0;
+                charsSincePause = 0;
+                burstTarget = nextBurstTarget(rng, true, profile);
                 continue;
             }
 
             if (action.char === 'backspace') {
                 burstChars = Math.max(0, burstChars - 1);
                 sentenceChars = Math.max(0, sentenceChars - 1);
+                charsSincePause = Math.max(0, charsSincePause - 1);
                 continue;
             }
 
             if (action.char === '\n') {
                 const pauseKind = lastVisibleChar === '\n' ? 'paragraph-block' : 'paragraph';
-                paced.push(buildCadencePause(pauseKind, rng, { burstChars, sentenceChars, previousChar: lastVisibleChar }));
+                paced.push(buildCadencePause(pauseKind, rng, {
+                    burstChars,
+                    sentenceChars,
+                    wordsSincePause,
+                    charsSincePause,
+                    previousChar: lastVisibleChar
+                }, profile));
                 burstChars = 0;
                 sentenceChars = 0;
-                burstTarget = nextBurstTarget(rng, true);
+                wordsSincePause = 0;
+                charsSincePause = 0;
+                currentWord = '';
+                burstTarget = nextBurstTarget(rng, true, profile);
                 lastVisibleChar = '\n';
                 continue;
             }
 
+            if (isWordCharacter(action.char)) {
+                currentWord += action.char.toLowerCase();
+            } else if (!((action.char === '\'' || action.char === '-') && currentWord)) {
+                currentWord = '';
+            }
+
             if (action.char !== ' ') {
                 burstChars += 1;
+                charsSincePause += 1;
             }
             sentenceChars += 1;
 
             if (['.', '!', '?'].includes(action.char)) {
-                paced.push(buildCadencePause('sentence', rng, { burstChars, sentenceChars, previousChar: lastVisibleChar }));
+                paced.push(buildCadencePause('sentence', rng, {
+                    burstChars,
+                    sentenceChars,
+                    wordsSincePause,
+                    charsSincePause,
+                    previousChar: lastVisibleChar
+                }, profile));
                 burstChars = 0;
                 sentenceChars = 0;
-                burstTarget = nextBurstTarget(rng, true);
+                wordsSincePause = 0;
+                charsSincePause = 0;
+                currentWord = '';
+                burstTarget = nextBurstTarget(rng, true, profile);
                 lastVisibleChar = action.char;
                 continue;
             }
 
-            if ([',', ';', ':'].includes(action.char) && rng() < 0.55) {
-                paced.push(buildCadencePause('clause', rng, { burstChars, sentenceChars, previousChar: lastVisibleChar }));
+            if ([',', ';', ':'].includes(action.char) && rng() < getClausePauseChance(profile, sentenceChars)) {
+                paced.push(buildCadencePause('clause', rng, {
+                    burstChars,
+                    sentenceChars,
+                    wordsSincePause,
+                    charsSincePause,
+                    previousChar: lastVisibleChar
+                }, profile));
+                charsSincePause = 0;
+                wordsSincePause = 0;
             }
 
-            if (action.char === ' ' && burstChars >= burstTarget) {
-                paced.push(buildCadencePause('burst', rng, { burstChars, sentenceChars, previousChar: lastVisibleChar }));
-                burstChars = 0;
-                burstTarget = nextBurstTarget(rng, false);
+            if (action.char === ' ') {
+                const completedWord = currentWord;
+                if (completedWord) {
+                    wordsSincePause += 1;
+                }
+
+                const smartPauseKind = getWordPauseKind(completedWord, rng, {
+                    sentenceChars,
+                    burstChars,
+                    wordsSincePause,
+                    charsSincePause
+                }, profile);
+                if (smartPauseKind) {
+                    paced.push(buildCadencePause(smartPauseKind, rng, {
+                        burstChars,
+                        sentenceChars,
+                        wordsSincePause,
+                        charsSincePause,
+                        previousChar: lastVisibleChar,
+                        currentWord: completedWord
+                    }, profile));
+                    charsSincePause = 0;
+                    wordsSincePause = 0;
+                } else if (burstChars >= burstTarget) {
+                    paced.push(buildCadencePause('burst', rng, {
+                        burstChars,
+                        sentenceChars,
+                        wordsSincePause,
+                        charsSincePause,
+                        previousChar: lastVisibleChar
+                    }, profile));
+                    burstChars = 0;
+                    charsSincePause = 0;
+                    wordsSincePause = 0;
+                    burstTarget = nextBurstTarget(rng, false, profile);
+                }
+
+                currentWord = '';
             }
 
             lastVisibleChar = action.char;
@@ -2155,32 +2444,42 @@ if (!globalThis.__writerdripRunnerLoaded) {
         return paced;
     }
 
-    function buildCadencePause(kind, rng, context = {}) {
+    function buildCadencePause(kind, rng, context = {}, cadenceProfile = null) {
+        const profile = cadenceProfile || getDefaultCadenceProfile();
         const burstLift = Math.min((context.burstChars || 0) * 0.006, 0.5);
         const sentenceLift = Math.min((context.sentenceChars || 0) * 0.01, 0.55);
+        const wordsLift = Math.min((context.wordsSincePause || 0) * 0.025, 0.45);
         let delay = 0.24 + rng() * 0.18;
         let distributionWeight = 0.9;
 
         switch (kind) {
+            case 'micro-word':
+                delay = profile.microPauseBase + (rng() * profile.microPauseSpread) + (wordsLift * 0.16);
+                distributionWeight = 1.08 + wordsLift;
+                break;
+            case 'thought':
+                delay = profile.thoughtPauseBase + (rng() * profile.thoughtPauseSpread) + (sentenceLift * 0.28) + (wordsLift * 0.22);
+                distributionWeight = 1.75 + sentenceLift + wordsLift;
+                break;
             case 'clause':
-                delay = 0.28 + rng() * 0.24 + (sentenceLift * 0.25);
-                distributionWeight = 1.2 + burstLift * 0.4;
+                delay = profile.clausePauseBase + (rng() * profile.clausePauseSpread) + (sentenceLift * 0.25);
+                distributionWeight = profile.clauseWeightBase + burstLift * 0.4;
                 break;
             case 'burst':
-                delay = 0.75 + rng() * 0.95 + burstLift;
-                distributionWeight = 2.6 + burstLift;
+                delay = profile.burstPauseBase + (rng() * profile.burstPauseSpread) + burstLift + (wordsLift * 0.18);
+                distributionWeight = profile.burstWeightBase + burstLift;
                 break;
             case 'sentence':
-                delay = 1.05 + rng() * 1.15 + sentenceLift;
-                distributionWeight = 3.3 + sentenceLift;
+                delay = profile.sentencePauseBase + (rng() * profile.sentencePauseSpread) + sentenceLift;
+                distributionWeight = profile.sentenceWeightBase + sentenceLift;
                 break;
             case 'paragraph':
-                delay = 1.45 + rng() * 1.55 + sentenceLift + burstLift;
-                distributionWeight = 4.7 + sentenceLift;
+                delay = profile.paragraphPauseBase + (rng() * profile.paragraphPauseSpread) + sentenceLift + burstLift;
+                distributionWeight = profile.paragraphWeightBase + sentenceLift;
                 break;
             case 'paragraph-block':
-                delay = 2.35 + rng() * 2.1 + sentenceLift + burstLift;
-                distributionWeight = 6.4 + burstLift;
+                delay = profile.paragraphBlockPauseBase + (rng() * profile.paragraphBlockPauseSpread) + sentenceLift + burstLift;
+                distributionWeight = profile.paragraphBlockWeightBase + burstLift;
                 break;
             default:
                 break;
@@ -2194,15 +2493,16 @@ if (!globalThis.__writerdripRunnerLoaded) {
         };
     }
 
-    function nextBurstTarget(rng, afterBoundary) {
-        if (afterBoundary) {
-            return Math.floor(24 + (rng() * 32));
-        }
-
-        return Math.floor(40 + (rng() * 72));
+    function nextBurstTarget(rng, afterBoundary, cadenceProfile = null) {
+        const profile = cadenceProfile || getDefaultCadenceProfile();
+        const range = afterBoundary
+            ? [profile.afterBoundaryBurstMin, profile.afterBoundaryBurstMax]
+            : [profile.midBurstMin, profile.midBurstMax];
+        return Math.floor(range[0] + (rng() * Math.max(1, range[1] - range[0])));
     }
 
-    function getDistributionWeight(char, progress, sentenceLength) {
+    function getDistributionWeight(char, progress, sentenceLength, cadenceProfile = null) {
+        const profile = cadenceProfile || getDefaultCadenceProfile();
         let weight = 0.9;
         if (char === '\n') {
             weight = 5.5;
@@ -2214,46 +2514,61 @@ if (!globalThis.__writerdripRunnerLoaded) {
             weight = 1.7;
         }
 
-        weight += Math.min(sentenceLength * 0.015, 0.4);
+        weight += Math.min(sentenceLength * profile.distributionSentenceLift, profile.distributionSentenceCap);
         if (progress < 0.08 || progress > 0.9) {
-            weight += 0.18;
+            weight += profile.edgeDistributionBoost;
         }
         return weight;
     }
 
     function getAdjacentKey(char, rng) {
         const keyboard = {
-            q: 'wa',
-            w: 'qes',
-            e: 'wrd',
-            r: 'etf',
-            t: 'ryg',
-            y: 'tuh',
-            u: 'yij',
-            i: 'uok',
-            o: 'ipl',
-            p: 'o',
-            a: 'qsz',
-            s: 'awdxz',
-            d: 'serfc',
-            f: 'drtgv',
-            g: 'ftyhb',
-            h: 'gyunj',
-            j: 'huikm',
-            k: 'jiol',
-            l: 'kop',
+            '1': '2q',
+            '2': '13w',
+            '3': '24we',
+            '4': '35er',
+            '5': '46rt',
+            '6': '57ty',
+            '7': '68yu',
+            '8': '79ui',
+            '9': '80io',
+            '0': '9-op',
+            '-': '0=p[',
+            '=': '-[]',
+            q: '12wa',
+            w: '123qase',
+            e: '234wsdr',
+            r: '345edft',
+            t: '456rfgy',
+            y: '567tghu',
+            u: '678yhji',
+            i: '789ujko',
+            o: '890iklp',
+            p: '90ol[-',
+            '[': 'p-=];',
+            ']': '[=\\;',
+            '\\': ']',
+            a: 'qwsz',
+            s: 'qweadzx',
+            d: 'wersfxc',
+            f: 'ertdgcv',
+            g: 'rtyfhvb',
+            h: 'tyugjbn',
+            j: 'yuikhmn',
+            k: 'uiolj,m',
+            l: 'iopk;,.',
+            ';': 'op[l/.,',
+            "'": ';]',
             z: 'asx',
             x: 'zsdc',
             c: 'xdfv',
             v: 'cfgb',
             b: 'vghn',
             n: 'bhjm',
-            m: 'njk',
-            '.': ',/',
-            ',': 'm.',
-            '/': '.;',
-            ';': 'l/',
-            "'": ';'
+            m: 'njk,',
+            ',': 'mkl.',
+            '.': ',l/;',
+            '/': '.;'
         };
 
         const lowered = char.toLowerCase();
@@ -2264,6 +2579,28 @@ if (!globalThis.__writerdripRunnerLoaded) {
 
         const adjacent = options[Math.floor(rng() * options.length)];
         return char === char.toUpperCase() ? adjacent.toUpperCase() : adjacent;
+    }
+
+    function getVowelSlip(char, rng) {
+        const lowered = char.toLowerCase();
+        const options = VOWEL_SLIP_MAP[lowered];
+        if (!options) {
+            return getAdjacentKey(char, rng);
+        }
+
+        const next = options[Math.floor(rng() * options.length)];
+        return char === char.toUpperCase() ? next.toUpperCase() : next;
+    }
+
+    function getSoftSlip(char, rng) {
+        const lowered = char.toLowerCase();
+        const options = SOFT_SLIP_MAP[lowered];
+        if (!options) {
+            return getAdjacentKey(char, rng);
+        }
+
+        const next = options[Math.floor(rng() * options.length)];
+        return char === char.toUpperCase() ? next.toUpperCase() : next;
     }
 
     function createRng(seed) {

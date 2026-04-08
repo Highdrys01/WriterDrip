@@ -221,8 +221,14 @@ async function validatePlanner() {
     assert.ok(mediumProfile.cooldownChars > highProfile.cooldownChars, 'High intensity should allow tighter spacing than medium.');
     assert.equal(lowProfile.wordVariantChance, 0, 'Low intensity should disable larger word-level variants.');
     assert.ok(highProfile.wordVariantChance > mediumProfile.wordVariantChance, 'High intensity should allow stronger word-level variant behavior than medium.');
+    assert.ok(highProfile.vowelSlipChance > mediumProfile.vowelSlipChance, 'High intensity should allow more vowel-drift mistakes than medium.');
+    assert.ok(mediumProfile.vowelSlipChance > lowProfile.vowelSlipChance, 'Medium intensity should allow more vowel-drift mistakes than low.');
+    assert.ok(highProfile.softSlipChance > mediumProfile.softSlipChance, 'High intensity should allow more nearby-letter slips than medium.');
+    assert.ok(highProfile.keyboardSlipChance > lowProfile.keyboardSlipChance, 'High intensity should allow more keyboard-neighbor slips than low.');
     assert.ok(highProfile.repairDepthFactor > mediumProfile.repairDepthFactor, 'High intensity should allow deeper repairs than medium.');
     assert.ok(mediumProfile.repairDepthFactor > lowProfile.repairDepthFactor, 'Medium intensity should allow deeper repairs than low.');
+    assert.ok(lowProfile.cadenceProfile && mediumProfile.cadenceProfile && highProfile.cadenceProfile, 'Draft profiles should carry a cadence profile.');
+    assert.ok(highProfile.cadenceProfile.connectivePauseChance >= mediumProfile.cadenceProfile.connectivePauseChance, 'Richer drafts should preserve smarter cadence settings.');
 
     const intensityAverages = {
         low: { repairs: 0, variants: 0, backspaces: 0 },
