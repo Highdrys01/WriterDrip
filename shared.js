@@ -11,6 +11,7 @@
     const MAX_DURATION_MINS = 10080;
     const CORRECTION_INTENSITIES = Object.freeze(['suggested', 'low', 'medium', 'high']);
     const CORRECTION_INTENSITY_SET = new Set(CORRECTION_INTENSITIES);
+    const MINUTES_PER_DAY = 24 * 60;
 
     function normalizeCorrectionIntensity(value) {
         const normalized = String(value || '').trim().toLowerCase();
@@ -77,6 +78,121 @@
 
         const rounded = Math.ceil(numeric);
         return Math.min(MAX_DURATION_MINS, Math.max(Math.max(MIN_DURATION_MINS, minimumDurationMins || MIN_DURATION_MINS), rounded));
+    }
+
+    function normalizeDailySchedule(rawSchedule) {
+        if (!rawSchedule || rawSchedule.enabled === false) {
+            return null;
+        }
+
+        const startMinute = normalizeMinuteOfDay(rawSchedule.startMinute ?? rawSchedule.startTime ?? rawSchedule.start);
+        const endMinute = normalizeMinuteOfDay(rawSchedule.endMinute ?? rawSchedule.endTime ?? rawSchedule.end);
+
+        if (startMinute === null || endMinute === null || startMinute === endMinute) {
+            return null;
+        }
+
+        return {
+            enabled: true,
+            startMinute,
+            endMinute
+        };
+    }
+
+    function normalizeMinuteOfDay(value) {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            const rounded = Math.floor(value);
+            return rounded >= 0 && rounded < MINUTES_PER_DAY ? rounded : null;
+        }
+
+        if (typeof value === 'string') {
+            const match = value.trim().match(/^(\d{1,2}):(\d{2})$/);
+            if (!match) {
+                return null;
+            }
+
+            const hours = Number.parseInt(match[1], 10);
+            const minutes = Number.parseInt(match[2], 10);
+            if (!Number.isInteger(hours) || !Number.isInteger(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+                return null;
+            }
+
+            return (hours * 60) + minutes;
+        }
+
+        return null;
+    }
+
+    function getDailyScheduleStatus(rawSchedule, nowValue = Date.now()) {
+        const schedule = normalizeDailySchedule(rawSchedule);
+        if (!schedule) {
+            return {
+                enabled: false,
+                active: true,
+                overnight: false,
+                startMinute: null,
+                endMinute: null,
+                nextStartAt: null,
+                nextEndAt: null
+            };
+        }
+
+        const now = nowValue instanceof Date ? new Date(nowValue.getTime()) : new Date(nowValue);
+        const minuteOfDay = (now.getHours() * 60) + now.getMinutes();
+        const overnight = schedule.startMinute > schedule.endMinute;
+        const active = overnight
+            ? minuteOfDay >= schedule.startMinute || minuteOfDay < schedule.endMinute
+            : minuteOfDay >= schedule.startMinute && minuteOfDay < schedule.endMinute;
+
+        const nextStartAt = buildNextDailyMinuteDate(now, schedule.startMinute, active ? 1 : null);
+        let nextEndAt = null;
+        if (active) {
+            if (!overnight) {
+                nextEndAt = buildDateForDailyMinute(now, schedule.endMinute, 0, minuteOfDay >= schedule.endMinute ? 1 : 0);
+            } else {
+                nextEndAt = minuteOfDay >= schedule.startMinute
+                    ? buildDateForDailyMinute(now, schedule.endMinute, 1)
+                    : buildDateForDailyMinute(now, schedule.endMinute, 0);
+            }
+        }
+
+        return {
+            enabled: true,
+            active,
+            overnight,
+            startMinute: schedule.startMinute,
+            endMinute: schedule.endMinute,
+            nextStartAt: nextStartAt ? nextStartAt.getTime() : null,
+            nextEndAt: nextEndAt ? nextEndAt.getTime() : null
+        };
+    }
+
+    function buildNextDailyMinuteDate(now, minute, forcedDayOffset = null) {
+        const currentMinute = (now.getHours() * 60) + now.getMinutes();
+        let dayOffset = forcedDayOffset;
+        if (dayOffset === null) {
+            dayOffset = currentMinute < minute ? 0 : 1;
+        }
+        return buildDateForDailyMinute(now, minute, dayOffset);
+    }
+
+    function buildDateForDailyMinute(now, minute, dayOffset = 0, extraDayOffset = 0) {
+        const target = new Date(now.getTime());
+        target.setSeconds(0, 0);
+        target.setHours(Math.floor(minute / 60), minute % 60, 0, 0);
+        target.setDate(target.getDate() + dayOffset + extraDayOffset);
+        return target;
+    }
+
+    function formatMinuteOfDay(minuteOfDay) {
+        const minute = normalizeMinuteOfDay(minuteOfDay);
+        if (minute === null) {
+            return '';
+        }
+
+        const hours = Math.floor(minute / 60);
+        const minutes = minute % 60;
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
     }
 
     function analyzeDraftText(text, durationMins = null) {
@@ -351,6 +467,10 @@
         estimateMinimumDurationSeconds,
         getMinimumDurationMins,
         normalizeDurationMins,
+        normalizeDailySchedule,
+        normalizeMinuteOfDay,
+        getDailyScheduleStatus,
+        formatMinuteOfDay,
         analyzeDraftText,
         suggestCorrectionIntensity
     });

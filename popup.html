@@ -128,7 +128,8 @@
     }
 
     textarea,
-    input[type="number"] {
+    input[type="number"],
+    input[type="time"] {
       width: 100%;
       border-radius: 16px;
       border: 1px solid var(--border);
@@ -148,6 +149,7 @@
 
     textarea:focus,
     input[type="number"]:focus,
+    input[type="time"]:focus,
     button:focus-visible {
       outline: none;
       border-color: rgba(219, 94, 54, 0.55);
@@ -176,6 +178,24 @@
     .session-grid {
       display: grid;
       gap: 10px;
+    }
+
+    .time-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .time-field {
+      display: grid;
+      gap: 6px;
+    }
+
+    .time-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--muted);
     }
 
     .preset-row,
@@ -533,6 +553,28 @@
             <button class="choice-chip" type="button" data-intensity="high">High</button>
           </div>
           <span class="hint" id="correctionHint">Suggested adapts to draft length, structure, and pacing once you add text.</span>
+        </div>
+
+        <div class="card">
+          <div class="label-row">
+            <span>Run windows</span>
+            <span class="meta" id="scheduleMeta">Any time</span>
+          </div>
+          <div class="choice-row" id="scheduleGroup" aria-label="Run window mode">
+            <button class="choice-chip" type="button" data-schedule-mode="any">Any time</button>
+            <button class="choice-chip" type="button" data-schedule-mode="window">Daily window</button>
+          </div>
+          <div class="time-row" id="scheduleFields" hidden>
+            <label class="time-field" for="scheduleStart">
+              <span class="time-label">Start</span>
+              <input type="time" id="scheduleStart" value="09:00" step="60">
+            </label>
+            <label class="time-field" for="scheduleEnd">
+              <span class="time-label">End</span>
+              <input type="time" id="scheduleEnd" value="17:00" step="60">
+            </label>
+          </div>
+          <span class="hint" id="scheduleHint">Use a daily window if you want WriterDrip to wait and continue later instead of running in one uninterrupted block.</span>
         </div>
       </section>
 

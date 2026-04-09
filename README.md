@@ -19,8 +19,10 @@ Local-first, always free, and built for the Google Doc already open in your brow
 
 - WriterDrip only works on editable Google Docs pages.
 - Leave correction intensity on `Suggested` if you want the default behavior.
+- Switch `Run windows` to `Daily window` if you want one run to pause and continue across different parts of the day.
 - You can switch to other tabs while the original Google Doc tab keeps running.
 - Keep your browser open, keep the original Google Doc tab open, and keep your computer awake until the drip finishes.
+- Daily windows help split a run across time blocks, but WriterDrip still needs the browser, Doc tab, and computer available when each window opens.
 - If the Doc tab reloads or closes unexpectedly, reopen the same Google Doc and use `Resume` if WriterDrip offers it.
 - Reload the extension from `chrome://extensions` after pulling updates from GitHub.
 
@@ -51,6 +53,7 @@ Local-first, always free, and built for the Google Doc already open in your brow
 - Lets you choose a custom duration from the draft-sized minimum up to 1 week, or use built-in 1 hour, 1 day, and 1 week presets
 - Adds layered pacing with burst pauses, sentence or paragraph rests, and context-aware self-correction
 - Includes `Suggested`, `Low`, `Medium`, and `High` correction intensity modes, with `Suggested` adapting to the current draft automatically
+- Can pause outside a daily run window and continue in the next selected window
 - Runs a preflight start check before typing so the current Doc, editor surface, and typing context are ready
 - Supports pause, resume, and stop controls
 - Shows a recovery wizard when the Doc tab reloads, sleeps, or loses the editor context
