@@ -18,7 +18,8 @@ const {
     MAX_DURATION_MINS,
     normalizeCorrectionIntensity,
     sanitizeDraftText,
-    getMinimumDurationMins
+    getMinimumDurationMins,
+    normalizeDurationMins
 } = Shared;
 
 const SESSIONS_KEY = 'writerdripTabSessions';
@@ -604,7 +605,7 @@ async function runPreflightCheck(tabId, expectedDocKey) {
     try {
         await waitForTabReady(tabId);
         await ensureRunnerInjected(tabId);
-        const response = await sendMessageToTab(tabId, {
+        const response = await sendRunnerMessageWithCompatibility(tabId, {
             type: 'writerdrip:probe-editor',
             expectedDocKey
         });
@@ -659,13 +660,33 @@ async function ensureRunnerInjected(tabId) {
 
 async function sendRunnerCommand(tabId, payload) {
     await ensureRunnerInjected(tabId);
-    const response = await sendMessageToTab(tabId, payload);
+    const response = await sendRunnerMessageWithCompatibility(tabId, payload);
 
     if (!response || response.status === 'error') {
         throw createCodedError(response?.code || inferIssueCode(response?.message), response?.message || 'The runner did not accept the command.');
     }
 
     return response;
+}
+
+async function sendRunnerMessageWithCompatibility(tabId, payload) {
+    const response = await sendMessageToTab(tabId, payload);
+    if (shouldRefreshRunnerFromResponse(response)) {
+        return {
+            status: 'error',
+            code: ISSUE_CODES.EDITOR_NOT_READY,
+            message: 'Refresh the Google Doc tab once after reloading or updating WriterDrip, then try again.'
+        };
+    }
+    return response;
+}
+
+function shouldRefreshRunnerFromResponse(response) {
+    if (!response || response.status !== 'error') {
+        return false;
+    }
+
+    return /unknown runner message/i.test(String(response.message || ''));
 }
 
 async function sendMessageToTab(tabId, message, attempt = 0) {
@@ -855,10 +876,10 @@ async function getUiState(tabId, url = '') {
 
 function createJob(rawJob) {
     const text = typeof rawJob?.text === 'string' ? sanitizeDraftText(rawJob.text).trim() : '';
-    const durationMins = Number.parseFloat(rawJob?.durationMins);
+    const minimumDurationMins = getMinimumDurationMins(text);
+    const durationMins = normalizeDurationMins(rawJob?.durationMins, minimumDurationMins);
     const docKey = typeof rawJob?.docKey === 'string' && rawJob.docKey.trim() ? rawJob.docKey.trim() : null;
     const correctionIntensity = normalizeCorrectionIntensity(rawJob?.correctionIntensity);
-    const minimumDurationMins = getMinimumDurationMins(text);
     if (!text || !docKey || !Number.isFinite(durationMins) || durationMins < minimumDurationMins || durationMins > MAX_DURATION_MINS) {
         return null;
     }

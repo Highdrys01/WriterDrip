@@ -15,8 +15,8 @@ const {
     MIN_DURATION_MINS,
     MAX_DURATION_MINS,
     normalizeCorrectionIntensity,
+    normalizeDurationMins,
     sanitizeDraftText,
-    getMinimumDurationMins,
     analyzeDraftText
 } = Shared;
 
@@ -206,6 +206,15 @@ function bindEvents() {
         updateCorrectionUi();
         syncButtons();
         schedulePreflightRefresh();
+        await saveDraft();
+    });
+
+    durationInput.addEventListener('blur', async () => {
+        normalizeDurationFieldValue({ clampToMinimum: true });
+        updatePresetSelection();
+        updateCorrectionUi();
+        syncButtons();
+        schedulePreflightRefresh(true);
         await saveDraft();
     });
 
@@ -686,7 +695,7 @@ async function clearDraft() {
 function collectDraftJob() {
     const draftAnalysis = getDraftAnalysis();
     const text = draftAnalysis.trimmed;
-    const durationMins = Number.parseFloat(durationInput.value);
+    const durationMins = normalizeDurationFieldValue({ clampToMinimum: false });
     const minimumDuration = draftAnalysis.minimumDurationMins;
 
     if (sessionState.activeJob) {
@@ -1323,7 +1332,7 @@ function syncMinimumDuration(forceAdjust = false) {
     const minimumDuration = getDraftAnalysis().minimumDurationMins;
     durationInput.min = String(minimumDuration);
 
-    const currentDuration = Number.parseFloat(durationInput.value);
+    const currentDuration = Number(durationInput.value);
     if (forceAdjust || !Number.isFinite(currentDuration) || currentDuration < minimumDuration) {
         durationInput.value = String(minimumDuration);
     }
@@ -1394,6 +1403,19 @@ function formatCorrectionIntensity(value) {
 
 function getDraftAnalysis(text = inputText.value, durationMins = Number.parseFloat(durationInput.value)) {
     return analyzeDraftText(text, durationMins);
+}
+
+function normalizeDurationFieldValue(options = {}) {
+    const draftAnalysis = getDraftAnalysis(inputText.value, Number(durationInput.value));
+    const normalized = normalizeDurationMins(durationInput.value, options.clampToMinimum === false ? MIN_DURATION_MINS : draftAnalysis.minimumDurationMins);
+    if (normalized === null) {
+        return null;
+    }
+
+    if (String(normalized) !== String(durationInput.value)) {
+        durationInput.value = String(normalized);
+    }
+    return normalized;
 }
 
 function inferIssueCode(message = '') {

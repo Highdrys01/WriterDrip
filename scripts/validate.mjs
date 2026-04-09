@@ -316,6 +316,9 @@ async function validatePlanner() {
     const shortDraftAnalysis = shared.analyzeDraftText('Quick note to finish tonight.', 5);
     assert.equal(shortDraftAnalysis.suggestedCorrectionIntensity, 'low', 'Very short drafts should stay on low suggestion.');
     assert.match(shortDraftAnalysis.suggestedCorrectionReason, /short/i, 'Short drafts should explain that they are too short for stronger correction behavior.');
+    assert.equal(shared.normalizeDurationMins('2.2', 1), 3, 'Duration normalization should round partial minutes up.');
+    assert.equal(shared.normalizeDurationMins('0.2', 5), 5, 'Duration normalization should respect the current draft minimum.');
+    assert.equal(shared.normalizeDurationMins('abc', 5), null, 'Duration normalization should reject invalid numeric input.');
 
     const balancedDraftAnalysis = shared.analyzeDraftText(
         'This draft is long enough to feel like normal prose, but it is not massive. It has a few sentences, some commas, and a steady rhythm throughout the paragraph.',

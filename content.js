@@ -6,8 +6,16 @@
  * https://github.com/Highdrys01/WriterDrip
  */
 
-if (!globalThis.__writerdripRunnerLoaded) {
+const WRITERDRIP_RUNNER_VERSION = '2026.04.08.1';
+if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSION) {
+    try {
+        globalThis.__writerdripRunnerController?.dispose?.();
+    } catch (error) {
+        console.warn('[WriterDrip] Failed to dispose the previous runner controller.', error);
+    }
+
     globalThis.__writerdripRunnerLoaded = true;
+    globalThis.__writerdripRunnerVersion = WRITERDRIP_RUNNER_VERSION;
     const DOC_PATH_PATTERN = /^\/document\/d\/([^/]+)/;
 
     const RUNNER_STATES = {
@@ -41,7 +49,8 @@ if (!globalThis.__writerdripRunnerLoaded) {
     const {
         normalizeCorrectionIntensity,
         sanitizeDraftText,
-        analyzeDraftText
+        analyzeDraftText,
+        normalizeDurationMins
     } = Shared;
 
     const PROFILE = {
@@ -302,7 +311,7 @@ if (!globalThis.__writerdripRunnerLoaded) {
 
     let runner = createIdleRunner();
 
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const runtimeMessageListener = (message, sender, sendResponse) => {
         if (!message?.type) {
             return false;
         }
@@ -315,9 +324,10 @@ if (!globalThis.__writerdripRunnerLoaded) {
             });
 
         return true;
-    });
+    };
+    chrome.runtime.onMessage.addListener(runtimeMessageListener);
 
-    window.addEventListener('pagehide', () => {
+    const pageHideListener = () => {
         if (runner.runId && (runner.state === RUNNER_STATES.RUNNING || runner.state === RUNNER_STATES.PAUSED)) {
             void notifyBackground('runner:error', {
                 runId: runner.runId,
@@ -325,15 +335,21 @@ if (!globalThis.__writerdripRunnerLoaded) {
                 message: 'The page changed while a drip was active.'
             });
         }
-    });
+    };
+    window.addEventListener('pagehide', pageHideListener);
 
-    document.addEventListener('keydown', handleTrustedUserInterference, true);
-    document.addEventListener('beforeinput', handleTrustedUserInterference, true);
-    document.addEventListener('input', handleTrustedUserInterference, true);
-    document.addEventListener('compositionstart', handleTrustedUserInterference, true);
-    document.addEventListener('mousedown', handleTrustedUserInterference, true);
-    document.addEventListener('touchstart', handleTrustedUserInterference, true);
-    document.addEventListener('paste', handleTrustedUserInterference, true);
+    const interferenceEvents = [
+        'keydown',
+        'beforeinput',
+        'input',
+        'compositionstart',
+        'mousedown',
+        'touchstart',
+        'paste'
+    ];
+    for (const eventName of interferenceEvents) {
+        document.addEventListener(eventName, handleTrustedUserInterference, true);
+    }
 
     async function handleRunnerMessage(message) {
         switch (message.type) {
@@ -699,7 +715,7 @@ if (!globalThis.__writerdripRunnerLoaded) {
         }
 
         const text = sanitizeDraftText(job.text);
-        const durationMins = Number.parseFloat(job.durationMins);
+        const durationMins = normalizeDurationMins(job.durationMins, 1);
         const docKey = typeof job.docKey === 'string' && job.docKey.trim() ? job.docKey.trim() : null;
         if (!text.trim() || !docKey || !Number.isFinite(durationMins) || durationMins <= 0) {
             return null;
@@ -2948,6 +2964,17 @@ if (!globalThis.__writerdripRunnerLoaded) {
         return new Promise((resolve) => setTimeout(resolve, milliseconds));
     }
 
+    function disposeRunnerController() {
+        runner.stopRequested = true;
+        runner.paused = false;
+        runner.pauseStartedAtMs = 0;
+        chrome.runtime?.onMessage?.removeListener?.(runtimeMessageListener);
+        window.removeEventListener?.('pagehide', pageHideListener);
+        for (const eventName of interferenceEvents) {
+            document.removeEventListener?.(eventName, handleTrustedUserInterference, true);
+        }
+    }
+
     globalThis.__writerdripTestHooks = Object.freeze({
         buildActionPlan,
         buildDraftMistakeProfile,
@@ -2956,5 +2983,10 @@ if (!globalThis.__writerdripRunnerLoaded) {
         replayActionPlan,
         countRepairSequences,
         sumActionDelays
+    });
+
+    globalThis.__writerdripRunnerController = Object.freeze({
+        version: WRITERDRIP_RUNNER_VERSION,
+        dispose: disposeRunnerController
     });
 }

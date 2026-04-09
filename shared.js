@@ -69,6 +69,16 @@
         return Math.min(MAX_DURATION_MINS, Math.max(MIN_DURATION_MINS, Math.ceil(seconds / 60)));
     }
 
+    function normalizeDurationMins(value, minimumDurationMins = MIN_DURATION_MINS) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+            return null;
+        }
+
+        const rounded = Math.ceil(numeric);
+        return Math.min(MAX_DURATION_MINS, Math.max(Math.max(MIN_DURATION_MINS, minimumDurationMins || MIN_DURATION_MINS), rounded));
+    }
+
     function analyzeDraftText(text, durationMins = null) {
         const sanitized = sanitizeDraftText(text);
         const trimmed = sanitized.trim();
@@ -340,6 +350,7 @@
         sanitizeDraftText,
         estimateMinimumDurationSeconds,
         getMinimumDurationMins,
+        normalizeDurationMins,
         analyzeDraftText,
         suggestCorrectionIntensity
     });
