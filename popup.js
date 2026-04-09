@@ -698,9 +698,12 @@ function getPreflightRequestKey() {
     const draftAnalysis = getDraftAnalysis();
     return [
         currentTabId || 'no-tab',
+        currentPageKind || 'no-page-kind',
         extractGoogleDocKey(currentTabUrl) || 'no-doc',
         draftAnalysis.charCount,
-        draftAnalysis.wordCount
+        draftAnalysis.wordCount,
+        draftAnalysis.minimumDurationMins,
+        durationInput.value || ''
     ].join('|');
 }
 
@@ -769,13 +772,15 @@ async function refreshPreflightReport(options = {}) {
 
     const report = response?.ok
         ? normalizePreflightReport(response.report)
-        : normalizePreflightReport({
-            ready: false,
-            code: response?.errorCode || 'background-unavailable',
-            message: response?.error || 'WriterDrip could not run the start check.',
-            checks: [],
-            note: 'Reload WriterDrip from chrome://extensions if the start check keeps failing.'
-        });
+        : shouldUseCompatibilityPreflight(response)
+            ? buildCompatibilityPreflightReport()
+            : normalizePreflightReport({
+                ready: false,
+                code: response?.errorCode || 'background-unavailable',
+                message: response?.error || 'WriterDrip could not run the start check.',
+                checks: [],
+                note: 'Reload WriterDrip from chrome://extensions if the start check keeps failing.'
+            });
 
     preflightState = {
         status: 'ready',
@@ -784,6 +789,97 @@ async function refreshPreflightReport(options = {}) {
     };
     render();
     return report;
+}
+
+function shouldUseCompatibilityPreflight(response) {
+    if (!response || response.ok) {
+        return false;
+    }
+
+    if (response.errorCode === 'unknown-command') {
+        return true;
+    }
+
+    const detail = `${response.error || ''} ${response.message || ''}`.trim();
+    return /unknown command:\s*ui:preflight/i.test(detail);
+}
+
+function buildCompatibilityPreflightReport(context = {}) {
+    const tabId = context.tabId ?? currentTabId;
+    const pageKind = context.pageKind ?? currentPageKind;
+    const durationValue = Number.parseFloat(context.durationValue ?? durationInput.value);
+    const draftAnalysis = context.draftAnalysis || getDraftAnalysis(context.text ?? inputText.value, durationValue);
+    const hasActiveTab = Boolean(tabId);
+    const onGoogleDoc = pageKind === PAGE_KINDS.GOOGLE_DOC;
+    const hasDraft = Boolean(draftAnalysis.trimmed);
+    const validDuration = Number.isFinite(durationValue) &&
+        durationValue >= draftAnalysis.minimumDurationMins &&
+        durationValue <= MAX_DURATION_MINS;
+
+    let code = null;
+    let message = 'WriterDrip is using a compatibility start check while the background worker refreshes.';
+    let note = 'Press Start to run the full Google Docs attach check. If the start check stays in compatibility mode, reload WriterDrip from chrome://extensions.';
+
+    if (!hasActiveTab) {
+        code = 'no-active-tab';
+        message = 'No active Google Doc tab is available.';
+        note = 'Open the Google Doc you want to use and reopen WriterDrip.';
+    } else if (pageKind === PAGE_KINDS.RESTRICTED) {
+        code = 'unsupported-page';
+        message = 'Open the Google Doc you want to use in a normal browser tab.';
+        note = 'Chrome internal pages and the Web Store do not allow WriterDrip to run.';
+    } else if (!onGoogleDoc) {
+        code = 'unsupported-page';
+        message = 'WriterDrip only works on editable Google Docs document pages.';
+        note = 'Open the Google Doc you want to use, click inside the document body, then reopen WriterDrip.';
+    } else if (!hasDraft) {
+        code = 'invalid-job';
+        message = 'Paste the text you want WriterDrip to type first.';
+        note = 'Once the draft is in place, WriterDrip can run the full start check on the active Google Doc.';
+    } else if (!validDuration) {
+        code = 'invalid-job';
+        message = `Choose a duration between ${formatDuration(draftAnalysis.minimumDurationMins)} and ${formatDuration(MAX_DURATION_MINS)}.`;
+        note = 'The draft-aware minimum keeps WriterDrip from starting runs that are too short to finish cleanly.';
+    }
+
+    return normalizePreflightReport({
+        ready: !code,
+        code,
+        message,
+        checks: [
+            {
+                id: 'doc-tab',
+                label: 'Google Doc tab available',
+                pass: hasActiveTab && onGoogleDoc,
+                detail: hasActiveTab && onGoogleDoc
+                    ? 'WriterDrip can reach the active Google Doc tab.'
+                    : 'Open the Google Doc you want to use in the current browser tab.'
+            },
+            {
+                id: 'draft',
+                label: 'Draft ready',
+                pass: hasDraft,
+                detail: hasDraft
+                    ? 'The current draft is ready for a start check.'
+                    : 'Paste the text you want WriterDrip to type before starting.'
+            },
+            {
+                id: 'duration',
+                label: 'Duration fits this draft',
+                pass: validDuration,
+                detail: validDuration
+                    ? `Current duration: ${formatDuration(durationValue)}.`
+                    : `Use at least ${formatDuration(draftAnalysis.minimumDurationMins)} for this draft.`
+            },
+            {
+                id: 'compatibility',
+                label: 'Compatibility start check active',
+                pass: true,
+                detail: 'The popup is using a local check until Chrome refreshes the background worker. Start still runs the full editor attach check.'
+            }
+        ],
+        note
+    });
 }
 
 function normalizePreflightReport(report) {
@@ -1312,3 +1408,8 @@ async function readLocal(key) {
     const result = await chrome.storage.local.get(key);
     return result[key];
 }
+
+globalThis.__writerdripPopupTestHooks = {
+    buildCompatibilityPreflightReport,
+    shouldUseCompatibilityPreflight
+};

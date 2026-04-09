@@ -195,6 +195,45 @@ async function validatePopupRuntime() {
     await evaluateScript(popupSandbox, 'shared.js');
     await evaluateScript(popupSandbox, 'popup.js');
     await flushMicrotasks();
+
+    const hooks = popupSandbox.__writerdripPopupTestHooks;
+    assert.ok(hooks, 'popup.js should expose popup test hooks.');
+    assert.equal(
+        hooks.shouldUseCompatibilityPreflight({ ok: false, errorCode: 'unknown-command', error: 'Unknown command: ui:preflight' }),
+        true,
+        'Popup should fall back to compatibility preflight when a stale background worker does not understand ui:preflight.'
+    );
+    assert.equal(
+        hooks.shouldUseCompatibilityPreflight({ ok: false, errorCode: 'background-unavailable', error: 'Unable to reach the background worker.' }),
+        false,
+        'Popup should not treat a missing background worker as a compatibility-only case.'
+    );
+
+    const compatibilityReady = hooks.buildCompatibilityPreflightReport({
+        tabId: 1,
+        pageKind: 'google-doc',
+        text: 'A draft that is ready to start in the current Google Doc.',
+        durationValue: 8
+    });
+    assert.equal(compatibilityReady.ready, true, 'Compatibility preflight should pass when the local popup checks are satisfied.');
+    assert.match(
+        compatibilityReady.note,
+        /compatibility|background worker refreshes|chrome:\/\/extensions/i,
+        'Compatibility preflight should explain why the local check is being used.'
+    );
+
+    const compatibilityBlocked = hooks.buildCompatibilityPreflightReport({
+        tabId: 1,
+        pageKind: 'google-doc',
+        text: 'A much longer draft with enough text to need a longer minimum duration before it can finish cleanly.',
+        durationValue: 0.5
+    });
+    assert.equal(compatibilityBlocked.ready, false, 'Compatibility preflight should still block invalid local draft inputs.');
+    assert.equal(
+        compatibilityBlocked.checks.some((check) => check.id === 'duration' && check.pass === false),
+        true,
+        'Compatibility preflight should surface a failed duration check when the chosen time is too short.'
+    );
 }
 
 async function validatePlanner() {
