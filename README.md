@@ -50,7 +50,10 @@ Local-first, always free, and built for the Google Doc already open in your brow
 - Lets you choose a custom duration from the draft-sized minimum up to 1 week, or use built-in 1 hour, 1 day, and 1 week presets
 - Adds layered pacing with burst pauses, sentence or paragraph rests, and context-aware self-correction
 - Includes `Suggested`, `Low`, `Medium`, and `High` correction intensity modes, with `Suggested` adapting to the current draft automatically
+- Runs a preflight start check before typing so the current Doc, editor surface, and typing context are ready
 - Supports pause, resume, and stop controls
+- Shows a recovery wizard when the Doc tab reloads, sleeps, or loses the editor context
+- Records a completion check after each run so you can see whether the final editor state still looked clean
 - Binds each drip to the specific Google Doc tab where it started
 - Keeps active session state outside the popup so closing the popup does not immediately stop the run
 

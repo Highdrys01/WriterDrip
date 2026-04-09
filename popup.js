@@ -47,6 +47,21 @@ const statusEl = document.getElementById('status');
 const statusTitleEl = document.getElementById('statusTitle');
 const statusTextEl = document.getElementById('statusText');
 const statusHintEl = document.getElementById('statusHint');
+const preflightPanel = document.getElementById('preflightPanel');
+const preflightMetaEl = document.getElementById('preflightMeta');
+const preflightSummaryEl = document.getElementById('preflightSummary');
+const preflightListEl = document.getElementById('preflightList');
+const preflightNoteEl = document.getElementById('preflightNote');
+const recoveryPanel = document.getElementById('recoveryPanel');
+const recoveryMetaEl = document.getElementById('recoveryMeta');
+const recoverySummaryEl = document.getElementById('recoverySummary');
+const recoveryStepsEl = document.getElementById('recoverySteps');
+const recoveryNoteEl = document.getElementById('recoveryNote');
+const completionPanel = document.getElementById('completionPanel');
+const completionMetaEl = document.getElementById('completionMeta');
+const completionSummaryEl = document.getElementById('completionSummary');
+const completionListEl = document.getElementById('completionList');
+const completionNoteEl = document.getElementById('completionNote');
 const presetButtons = Array.from(document.querySelectorAll('.preset'));
 const correctionButtons = Array.from(document.querySelectorAll('[data-intensity]'));
 
@@ -129,6 +144,13 @@ let currentPageKind = PAGE_KINDS.MISSING;
 let uiBusy = false;
 let sessionState = createDefaultSessionState();
 let selectedCorrectionIntensity = 'suggested';
+let preflightState = {
+    status: 'idle',
+    report: null,
+    requestKey: ''
+};
+let preflightTimer = null;
+let preflightRequestId = 0;
 
 document.addEventListener('DOMContentLoaded', async () => {
     updateTextStats();
@@ -153,6 +175,7 @@ function createDefaultSessionState(overrides = {}) {
         lastError: null,
         lastErrorCode: null,
         lastCompletedJob: null,
+        lastCompletedVerification: null,
         ...overrides
     };
 }
@@ -163,6 +186,7 @@ function bindEvents() {
         syncMinimumDuration();
         updateCorrectionUi();
         syncButtons();
+        schedulePreflightRefresh();
         await saveDraft();
     });
 
@@ -170,6 +194,7 @@ function bindEvents() {
         updatePresetSelection();
         updateCorrectionUi();
         syncButtons();
+        schedulePreflightRefresh();
         await saveDraft();
     });
 
@@ -202,6 +227,7 @@ function bindEvents() {
             updatePresetSelection();
             updateCorrectionUi();
             syncButtons();
+            schedulePreflightRefresh();
             await saveDraft();
             durationInput.focus();
         });
@@ -211,6 +237,7 @@ function bindEvents() {
         button.addEventListener('click', async () => {
             selectedCorrectionIntensity = normalizeCorrectionIntensity(button.dataset.intensity);
             updateCorrectionUi();
+            schedulePreflightRefresh();
             await saveDraft();
         });
     });
@@ -234,6 +261,7 @@ function bindEvents() {
         currentPageKind = detectPageKind(currentTabUrl);
         applyPageBadge();
         render();
+        schedulePreflightRefresh(true);
     });
 }
 
@@ -270,6 +298,7 @@ async function loadActiveTab() {
     updatePresetSelection();
     updateCorrectionUi();
     await refreshSessionState();
+    schedulePreflightRefresh(true);
 }
 
 async function refreshSessionState() {
@@ -297,6 +326,7 @@ async function refreshSessionState() {
     }
 
     render();
+    schedulePreflightRefresh(true);
 }
 
 function normalizeUiState(rawState) {
@@ -311,15 +341,78 @@ function normalizeUiState(rawState) {
         attentionCode: rawState?.attentionCode || null,
         lastError: rawState?.lastError || null,
         lastErrorCode: rawState?.lastErrorCode || null,
-        lastCompletedJob: rawState?.lastCompletedJob || null
+        lastCompletedJob: rawState?.lastCompletedJob || null,
+        lastCompletedVerification: rawState?.lastCompletedVerification || null
     });
 }
 
 function render() {
     renderActiveJob();
+    renderPreflightPanel();
+    renderRecoveryPanel();
+    renderCompletionPanel();
     renderStatus();
     updateCorrectionUi();
     syncButtons();
+}
+
+function renderPreflightPanel() {
+    const shouldShow = shouldShowPreflightPanel();
+    preflightPanel.hidden = !shouldShow;
+    if (!shouldShow) {
+        return;
+    }
+
+    if (preflightState.status === 'loading') {
+        preflightMetaEl.innerText = 'Checking';
+        preflightSummaryEl.innerText = 'Running a quick start check against the current Google Doc.';
+        preflightListEl.innerHTML = '';
+        preflightNoteEl.innerText = 'WriterDrip checks the current document, editor surface, and cursor before it starts.';
+        return;
+    }
+
+    const report = preflightState.report;
+    if (!report) {
+        preflightMetaEl.innerText = 'Pending';
+        preflightSummaryEl.innerText = 'Add a draft and keep this Google Doc ready to run the start check.';
+        preflightListEl.innerHTML = '';
+        preflightNoteEl.innerText = '';
+        return;
+    }
+
+    preflightMetaEl.innerText = report.ready ? 'Ready' : 'Fix before start';
+    preflightSummaryEl.innerText = report.message || (report.ready ? 'WriterDrip is ready to start.' : 'WriterDrip needs one more setup step before it can start.');
+    preflightListEl.innerHTML = renderCheckListMarkup(report.checks || []);
+    preflightNoteEl.innerText = report.note || '';
+}
+
+function renderRecoveryPanel() {
+    const code = sessionState.attentionCode || sessionState.lastErrorCode;
+    const shouldShow = Boolean((sessionState.attentionMessage || sessionState.lastError) && code);
+    recoveryPanel.hidden = !shouldShow;
+    if (!shouldShow) {
+        return;
+    }
+
+    const wizard = buildRecoveryWizard(code);
+    recoveryMetaEl.innerText = canResumeAttentionState(code) ? 'Resume available' : 'Restart required';
+    recoverySummaryEl.innerText = sessionState.lastError || sessionState.attentionMessage || wizard.summary;
+    recoveryStepsEl.innerHTML = renderStepListMarkup(wizard.steps);
+    recoveryNoteEl.innerText = wizard.note;
+}
+
+function renderCompletionPanel() {
+    const verification = sessionState.lastCompletedVerification;
+    const shouldShow = Boolean(sessionState.lastCompletedJob && verification);
+    completionPanel.hidden = !shouldShow;
+    if (!shouldShow) {
+        return;
+    }
+
+    completionMetaEl.innerText = verification.verified ? 'Verified' : 'Needs review';
+    completionSummaryEl.innerText = verification.summary || 'WriterDrip finished the last run.';
+    completionListEl.innerHTML = renderCheckListMarkup(verification.checks || []);
+    completionNoteEl.innerText = verification.note || '';
 }
 
 function renderActiveJob() {
@@ -409,11 +502,12 @@ function renderStatus() {
     }
 
     if (sessionState.lastCompletedJob) {
+        const verificationSummary = sessionState.lastCompletedVerification?.summary;
         setStatus({
-            title: 'Drip finished',
-            message: 'Last drip finished successfully.',
+            title: sessionState.lastCompletedVerification?.verified === false ? 'Drip finished with review note' : 'Drip finished',
+            message: verificationSummary || 'Last drip finished successfully.',
             hint: 'You can start another run in this same Google Doc tab.',
-            tone: 'success'
+            tone: sessionState.lastCompletedVerification?.verified === false ? 'warn' : 'success'
         });
         return;
     }
@@ -468,6 +562,12 @@ async function startNow() {
     }
 
     await withUiBusy(async () => {
+        const preflightReport = await refreshPreflightReport({ force: true });
+        if (!preflightReport?.ready) {
+            setStatus(buildIssueStatus(preflightReport?.code, preflightReport?.message || 'WriterDrip is not ready to start yet.', preflightReport?.note || 'Click inside the document body and run the start check again.', 'warn'));
+            return;
+        }
+
         const response = await sendBackgroundMessage('run:start', {
             tabId: currentTabId,
             url: currentTabUrl,
@@ -520,6 +620,8 @@ async function clearDraft() {
     updateTextStats();
     syncMinimumDuration(true);
     syncButtons();
+    resetPreflightState();
+    render();
     await saveDraft();
     setStatus('Draft cleared for this tab.', 'muted');
     inputText.focus();
@@ -575,12 +677,241 @@ async function handleBackgroundResponse(response, successMessage = '') {
 
     sessionState = normalizeUiState(response.state);
     render();
+    schedulePreflightRefresh(true);
 
     if (successMessage && !sessionState.lastError && !sessionState.attentionMessage && sessionState.state !== 'attention') {
         setStatus(successMessage, 'muted');
     }
 
     await saveDraft();
+}
+
+function shouldShowPreflightPanel() {
+    return currentPageKind === PAGE_KINDS.GOOGLE_DOC &&
+        Boolean(getDraftAnalysis().trimmed) &&
+        !sessionState.activeJob &&
+        !sessionState.attentionMessage &&
+        !sessionState.lastError;
+}
+
+function getPreflightRequestKey() {
+    const draftAnalysis = getDraftAnalysis();
+    return [
+        currentTabId || 'no-tab',
+        extractGoogleDocKey(currentTabUrl) || 'no-doc',
+        draftAnalysis.charCount,
+        draftAnalysis.wordCount
+    ].join('|');
+}
+
+function resetPreflightState() {
+    if (preflightTimer) {
+        clearTimeout(preflightTimer);
+        preflightTimer = null;
+    }
+
+    preflightState = {
+        status: 'idle',
+        report: null,
+        requestKey: ''
+    };
+}
+
+function schedulePreflightRefresh(immediate = false) {
+    if (preflightTimer) {
+        clearTimeout(preflightTimer);
+        preflightTimer = null;
+    }
+
+    if (!shouldShowPreflightPanel()) {
+        resetPreflightState();
+        render();
+        return;
+    }
+
+    if (immediate) {
+        void refreshPreflightReport({ force: false });
+        return;
+    }
+
+    preflightTimer = setTimeout(() => {
+        preflightTimer = null;
+        void refreshPreflightReport({ force: false });
+    }, 180);
+}
+
+async function refreshPreflightReport(options = {}) {
+    if (!shouldShowPreflightPanel()) {
+        resetPreflightState();
+        render();
+        return null;
+    }
+
+    const requestKey = getPreflightRequestKey();
+    if (!options.force && preflightState.status === 'ready' && preflightState.requestKey === requestKey) {
+        return preflightState.report;
+    }
+
+    preflightState.status = 'loading';
+    preflightState.requestKey = requestKey;
+    render();
+
+    const requestId = ++preflightRequestId;
+    const response = await sendBackgroundMessage('ui:preflight', {
+        tabId: currentTabId,
+        url: currentTabUrl,
+        expectedDocKey: extractGoogleDocKey(currentTabUrl)
+    });
+
+    if (requestId !== preflightRequestId) {
+        return preflightState.report;
+    }
+
+    const report = response?.ok
+        ? normalizePreflightReport(response.report)
+        : normalizePreflightReport({
+            ready: false,
+            code: response?.errorCode || 'background-unavailable',
+            message: response?.error || 'WriterDrip could not run the start check.',
+            checks: [],
+            note: 'Reload WriterDrip from chrome://extensions if the start check keeps failing.'
+        });
+
+    preflightState = {
+        status: 'ready',
+        report,
+        requestKey
+    };
+    render();
+    return report;
+}
+
+function normalizePreflightReport(report) {
+    return {
+        ready: Boolean(report?.ready),
+        code: report?.code || inferIssueCode(report?.message),
+        message: report?.message || '',
+        checks: Array.isArray(report?.checks)
+            ? report.checks.map((check) => ({
+                id: check.id || '',
+                label: check.label || '',
+                pass: Boolean(check.pass),
+                detail: check.detail || ''
+            }))
+            : [],
+        note: report?.note || ''
+    };
+}
+
+function buildRecoveryWizard(code) {
+    if (code === 'tab-suspended') {
+        return {
+            summary: 'The original Google Doc tab was suspended or the laptop slept during the run.',
+            steps: [
+                'Return to the original Google Doc tab.',
+                'Wait for the document to finish reloading completely.',
+                'Click once inside the main document body.',
+                canResumeAttentionState(code) ? 'Reopen WriterDrip and press Resume.' : 'Reopen WriterDrip and restart the drip if needed.'
+            ],
+            note: 'If Chrome reopened the same Google Doc in a new tab after sleep or restart, WriterDrip will try to reattach that saved session.'
+        };
+    }
+
+    if (code === 'background-unavailable') {
+        return {
+            summary: 'WriterDrip lost its background worker connection.',
+            steps: [
+                'Open chrome://extensions.',
+                'Reload WriterDrip.',
+                'Return to the original Google Doc tab and click inside the document body.',
+                'Reopen WriterDrip and continue from there.'
+            ],
+            note: 'This usually happens after Chrome unloads the extension worker or after an update.'
+        };
+    }
+
+    if (code === 'editor-auto-edit') {
+        return {
+            summary: 'Google Docs changed text on its own during the run.',
+            steps: [
+                'Open Tools > Preferences in Google Docs.',
+                'Turn off Smart Compose, spelling or grammar suggestions, and substitutions.',
+                'Review the document for any rewritten text.',
+                'Restart the drip from the point you want to keep.'
+            ],
+            note: 'WriterDrip stops here on purpose so Docs suggestions do not corrupt the rest of the run.'
+        };
+    }
+
+    if (code === 'manual-interaction' || code === 'typing-context-lost') {
+        return {
+            summary: 'The typing context changed while the run was active.',
+            steps: [
+                'Review the current Google Doc content.',
+                'Close comment boxes or other editable fields if they are open.',
+                'Click back into the main document body.',
+                canResumeAttentionState(code) ? 'Resume if the document still looks correct.' : 'Restart the drip if the document changed during the interruption.'
+            ],
+            note: 'WriterDrip prefers to stop instead of guessing when the cursor may have moved to the wrong place.'
+        };
+    }
+
+    if (code === 'editor-not-ready' || code === 'editor-focus-failed') {
+        return {
+            summary: 'The Google Docs editor was not ready when WriterDrip tried to attach.',
+            steps: [
+                'Wait for the Google Doc to finish loading.',
+                'Click once inside the main document body.',
+                'Reopen WriterDrip.',
+                canResumeAttentionState(code) ? 'Press Resume.' : 'Start the drip again.'
+            ],
+            note: 'Starting from the document body gives WriterDrip the cleanest editor target.'
+        };
+    }
+
+    return {
+        summary: 'WriterDrip needs a quick recovery step before it can continue.',
+        steps: [
+            'Return to the original Google Doc tab.',
+            'Review the document and click inside the main document body.',
+            canResumeAttentionState(code) ? 'Reopen WriterDrip and press Resume.' : 'Reopen WriterDrip and restart the drip if needed.'
+        ],
+        note: 'If the issue repeats, reload the extension and the Google Doc tab before trying again.'
+    };
+}
+
+function renderCheckListMarkup(items) {
+    if (!items?.length) {
+        return '';
+    }
+
+    return items.map((item) => `
+        <div class="check-item" data-pass="${item.pass ? 'true' : 'false'}">
+          <div class="item-title">${item.pass ? 'Pass' : 'Fix'}: ${escapeHtml(item.label || '')}</div>
+          <div class="item-copy">${escapeHtml(item.detail || '')}</div>
+        </div>
+    `).join('');
+}
+
+function renderStepListMarkup(items) {
+    if (!items?.length) {
+        return '';
+    }
+
+    return items.map((item, index) => `
+        <div class="step-item">
+          <div class="item-title"><span class="step-index">${index + 1}</span>${escapeHtml(item)}</div>
+        </div>
+    `).join('');
+}
+
+function escapeHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 async function sendBackgroundMessage(command, payload) {

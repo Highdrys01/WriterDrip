@@ -301,6 +301,70 @@
       color: var(--muted);
     }
 
+    .panel-stack {
+      display: grid;
+      gap: 8px;
+    }
+
+    .panel-meta {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .check-list,
+    .step-list {
+      display: grid;
+      gap: 7px;
+      margin: 10px 0 0;
+    }
+
+    .check-item,
+    .step-item {
+      display: grid;
+      gap: 2px;
+      padding: 8px 9px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.52);
+      border: 1px solid var(--border);
+    }
+
+    .check-item[data-pass="true"] {
+      border-color: rgba(37, 113, 75, 0.18);
+      background: rgba(37, 113, 75, 0.06);
+    }
+
+    .check-item[data-pass="false"] {
+      border-color: rgba(184, 75, 40, 0.18);
+      background: rgba(184, 75, 40, 0.06);
+    }
+
+    .item-title {
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1.35;
+    }
+
+    .item-copy {
+      font-size: 11px;
+      line-height: 1.4;
+      color: var(--muted);
+    }
+
+    .step-index {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      background: rgba(219, 94, 54, 0.12);
+      color: var(--accent-deep);
+      font-size: 10px;
+      font-weight: 800;
+      margin-right: 6px;
+    }
+
     .status {
       margin: 0 0 12px;
       padding: 11px 12px;
@@ -446,6 +510,38 @@
         <strong class="status-title" id="statusTitle">Loading WriterDrip</strong>
         <span class="status-copy" id="statusText">Loading the current page.</span>
         <span class="status-hint" id="statusHint" hidden></span>
+      </div>
+
+      <div class="panel-stack">
+        <section class="panel-card" id="preflightPanel" hidden>
+          <div class="label-row">
+            <span>Start check</span>
+            <span class="panel-meta" id="preflightMeta">Checking</span>
+          </div>
+          <p class="detail" id="preflightSummary"></p>
+          <div class="check-list" id="preflightList"></div>
+          <p class="detail" id="preflightNote"></p>
+        </section>
+
+        <section class="panel-card" id="recoveryPanel" hidden>
+          <div class="label-row">
+            <span>Recovery wizard</span>
+            <span class="panel-meta" id="recoveryMeta">Resume</span>
+          </div>
+          <p class="detail" id="recoverySummary"></p>
+          <div class="step-list" id="recoverySteps"></div>
+          <p class="detail" id="recoveryNote"></p>
+        </section>
+
+        <section class="panel-card" id="completionPanel" hidden>
+          <div class="label-row">
+            <span>Completion check</span>
+            <span class="panel-meta" id="completionMeta">Verified</span>
+          </div>
+          <p class="detail" id="completionSummary"></p>
+          <div class="check-list" id="completionList"></div>
+          <p class="detail" id="completionNote"></p>
+        </section>
       </div>
 
       <section class="panel-card" id="activePanel" hidden>

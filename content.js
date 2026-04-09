@@ -407,6 +407,7 @@ if (!globalThis.__writerdripRunnerLoaded) {
             paused: false,
             pauseStartedAtMs: 0,
             lockedElement: target,
+            lastCompletionVerification: null,
             lastReportedAt: 0,
             loopPromise: null
         };
@@ -586,6 +587,9 @@ if (!globalThis.__writerdripRunnerLoaded) {
         runner.stopRequested = false;
         runner.completedIndex = runner.actions.length;
         runner.elapsedSeconds = runner.totalSeconds;
+        await sleep(80);
+        runner.lastCompletionVerification = buildCompletionVerification();
+        payload.verification = runner.lastCompletionVerification;
         await reportProgress(true);
         await notifyBackground('runner:completed', payload);
     }
@@ -641,7 +645,10 @@ if (!globalThis.__writerdripRunnerLoaded) {
             actionIndex: runner.completedIndex || 0,
             totalActions,
             percent,
-            eta: formatClock(remainingSeconds)
+            eta: formatClock(remainingSeconds),
+            completionVerification: runner.state === RUNNER_STATES.COMPLETE
+                ? runner.lastCompletionVerification || null
+                : null
         };
     }
 
@@ -1284,33 +1291,120 @@ if (!globalThis.__writerdripRunnerLoaded) {
     }
 
     async function probeEditor(expectedDocKey) {
+        const checks = [];
+
         if (!isSupportedGoogleDocPage()) {
             return {
                 ...buildRunnerError(ISSUE_CODES.UNSUPPORTED_PAGE, 'WriterDrip only runs on Google Docs documents.'),
-                ready: false
+                ready: false,
+                checks: [
+                    buildDiagnosticCheck('page', 'Google Docs page', false, 'Open a normal editable Google Docs document page.')
+                ],
+                note: 'WriterDrip only attaches to editable Google Docs document pages.'
             };
         }
 
-        if (expectedDocKey && getCurrentDocKey() !== expectedDocKey) {
+        const currentDocKey = getCurrentDocKey();
+        const sameDoc = !expectedDocKey || currentDocKey === expectedDocKey;
+        checks.push(buildDiagnosticCheck(
+            'doc',
+            'Same Google Doc',
+            sameDoc,
+            sameDoc ? 'This tab is still on the intended Google Doc.' : 'Return to the original Google Doc tab before starting.'
+        ));
+
+        if (!sameDoc) {
             return {
                 ...buildRunnerError(ISSUE_CODES.WRONG_DOC, 'This tab is no longer on the same Google Doc.'),
-                ready: false
+                ready: false,
+                checks,
+                note: 'WriterDrip binds each run to one Google Doc tab so it does not drift into the wrong document.'
             };
         }
 
         const target = locateGoogleDocsTarget();
         const surface = locateGoogleDocsSurface();
-        if (!target || !surface) {
+        const editorReady = Boolean(target && surface);
+        checks.push(buildDiagnosticCheck(
+            'editor',
+            'Document editor detected',
+            editorReady,
+            editorReady ? 'WriterDrip found the Google Docs editor surface.' : 'Wait for the document body to finish loading, then click inside it once.'
+        ));
+
+        if (!editorReady) {
             return {
                 ...buildRunnerError(ISSUE_CODES.EDITOR_NOT_READY, 'Open the Google Doc body, wait for it to finish loading, and try again.'),
-                ready: false
+                ready: false,
+                checks,
+                note: 'If Google Docs just reloaded, give it a moment before starting the drip.'
+            };
+        }
+
+        const conflictingFocus = hasConflictingEditableFocus(target);
+        const bodyFocused = isTargetFocused(target);
+        const typingContextReady = !conflictingFocus;
+        checks.push(buildDiagnosticCheck(
+            'cursor',
+            'Typing context ready',
+            typingContextReady,
+            typingContextReady
+                ? (bodyFocused
+                    ? 'The typing cursor is already in the document body.'
+                    : 'WriterDrip can reattach the document cursor when the run starts.')
+                : 'Another editable field has focus. Close it, then click back into the document body.'
+        ));
+
+        if (!typingContextReady) {
+            return {
+                ...buildRunnerError(ISSUE_CODES.TYPING_CONTEXT_LOST, 'Another editable field has focus in Google Docs. Click back into the document body and try again.'),
+                ready: false,
+                checks,
+                note: 'Starting with the cursor in the main document body helps WriterDrip stay attached to the right editor target.'
             };
         }
 
         return {
             status: 'ok',
             ready: true,
-            docKey: getCurrentDocKey()
+            docKey: currentDocKey,
+            checks,
+            message: 'WriterDrip is ready to start in this Google Doc.',
+            note: 'Start the drip from this popup, then keep the original Google Doc tab, browser, and computer available until it finishes.'
+        };
+    }
+
+    function buildDiagnosticCheck(id, label, pass, detail) {
+        return {
+            id,
+            label,
+            pass: Boolean(pass),
+            detail: detail || ''
+        };
+    }
+
+    function buildCompletionVerification() {
+        const target = locateGoogleDocsTarget() || runner.lockedElement;
+        const sameDoc = isCurrentJobDocument(runner.job);
+        const surfaceReady = Boolean(locateGoogleDocsSurface());
+        const targetReady = Boolean(target && isUsableGoogleDocsTarget(target));
+        const contextStable = Boolean(targetReady && !hasConflictingEditableFocus(target));
+
+        const checks = [
+            buildDiagnosticCheck('plan-finished', 'Action plan finished', runner.completedIndex >= runner.actions.length, 'All planned typing and correction actions were delivered.'),
+            buildDiagnosticCheck('doc', 'Same Google Doc still open', sameDoc, sameDoc ? 'The tab stayed on the original Google Doc.' : 'The document changed before WriterDrip could finish its final check.'),
+            buildDiagnosticCheck('surface', 'Editor surface still available', surfaceReady && targetReady, surfaceReady && targetReady ? 'The Google Docs editor was still available after the last action.' : 'The editor surface was no longer fully available after the run ended.'),
+            buildDiagnosticCheck('context', 'No competing editor focus', contextStable, contextStable ? 'No other editable field was competing with the document body at the end of the run.' : 'Another editable field or transient UI may have taken focus at the end of the run.')
+        ];
+        const verified = checks.every((check) => check.pass);
+
+        return {
+            verified,
+            summary: verified
+                ? 'WriterDrip finished and the final editor check passed.'
+                : 'WriterDrip finished, but the final editor check needs review.',
+            note: 'This verifies the final run state that WriterDrip can observe locally. Google Docs still controls version history grouping and suggestion systems.',
+            checks
         };
     }
 
@@ -2819,6 +2913,7 @@ if (!globalThis.__writerdripRunnerLoaded) {
             paused: false,
             pauseStartedAtMs: 0,
             lockedElement: null,
+            lastCompletionVerification: null,
             lastReportedAt: 0,
             loopPromise: null
         };

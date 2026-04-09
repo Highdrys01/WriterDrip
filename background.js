@@ -153,6 +153,11 @@ async function handleMessage(message, sender) {
                 ok: true,
                 state: await getUiState(message.tabId, message.url || '')
             };
+        case 'ui:preflight':
+            return {
+                ok: true,
+                report: await handleUiPreflight(message.tabId, message.url || '', message.expectedDocKey || null)
+            };
         case 'run:start':
             return handleRunStart(message.tabId, message.url || '', message.job);
         case 'runner:pause-toggle':
@@ -181,10 +186,9 @@ async function handleRunStart(tabId, url, rawJob) {
         return buildErrorResponse(ISSUE_CODES.INVALID_JOB, `Enter text and choose a duration between ${formatDurationMins(minimumDurationMins)} and ${formatDurationMins(MAX_DURATION_MINS)}.`);
     }
 
-    try {
-        await verifyEditorTarget(tabId, job.docKey);
-    } catch (error) {
-        return buildErrorResponse(error.code || ISSUE_CODES.EDITOR_NOT_READY, error.message || 'Open the Google Doc, click inside the editor, and try again.');
+    const preflightReport = await runPreflightCheck(tabId, job.docKey);
+    if (!preflightReport.ready) {
+        return buildErrorResponse(preflightReport.code || ISSUE_CODES.EDITOR_NOT_READY, preflightReport.message || 'Open the Google Doc, click inside the editor, and try again.');
     }
 
     let runPayload = null;
@@ -211,6 +215,8 @@ async function handleRunStart(tabId, url, rawJob) {
         session.lastErrorCode = null;
         session.attentionMessage = null;
         session.attentionCode = null;
+        session.lastCompletedJob = null;
+        session.lastCompletedVerification = null;
         runPayload = {
             runId: session.activeRunId,
             job
@@ -443,6 +449,7 @@ async function handleRunnerCompleted(tabId, payload) {
         }
 
         session.lastCompletedJob = summarizeJob(session.activeJob);
+        session.lastCompletedVerification = normalizeCompletionVerification(payload.verification);
         resetActiveRun(session, SESSION_STATES.COMPLETE);
         session.progress = 1;
         session.eta = '00:00';
@@ -549,6 +556,32 @@ async function recoverSessionForTab(tabId, options = {}) {
     await syncHealthAlarm();
 }
 
+async function handleUiPreflight(tabId, url, expectedDocKey) {
+    if (!tabId) {
+        return buildPreflightReport({
+            ready: false,
+            code: ISSUE_CODES.NO_ACTIVE_TAB,
+            message: 'No active Google Doc tab is available.',
+            checks: [
+                buildPreflightCheck('doc-tab', 'Google Doc tab available', false, 'Open the Google Doc you want to use and reopen WriterDrip.')
+            ],
+            note: 'WriterDrip runs locally in your browser, so the Google Doc tab and your computer must stay available for the run.'
+        });
+    }
+
+    if (url) {
+        await withSessionLock(async () => {
+            const sessions = await readSessions();
+            const adopted = await adoptMatchingSessionForTab(tabId, url, sessions);
+            if (adopted) {
+                await writeSessions(sessions);
+            }
+        });
+    }
+
+    return runPreflightCheck(tabId, expectedDocKey);
+}
+
 async function restoreOrStartRun(tabId, payload) {
     await waitForTabReady(tabId);
     await ensureRunnerInjected(tabId);
@@ -567,16 +600,42 @@ async function restoreOrStartRun(tabId, payload) {
     return response;
 }
 
-async function verifyEditorTarget(tabId, expectedDocKey) {
-    await waitForTabReady(tabId);
-    await ensureRunnerInjected(tabId);
-    const response = await sendMessageToTab(tabId, {
-        type: 'writerdrip:probe-editor',
-        expectedDocKey
-    });
+async function runPreflightCheck(tabId, expectedDocKey) {
+    try {
+        await waitForTabReady(tabId);
+        await ensureRunnerInjected(tabId);
+        const response = await sendMessageToTab(tabId, {
+            type: 'writerdrip:probe-editor',
+            expectedDocKey
+        });
 
-    if (!response || response.status === 'error' || !response.ready) {
-        throw createCodedError(response?.code || ISSUE_CODES.EDITOR_NOT_READY, response?.message || 'WriterDrip could not attach to the Google Docs editor.');
+        if (!response || response.status === 'error' || !response.ready) {
+            return buildPreflightReport({
+                ready: false,
+                code: response?.code || ISSUE_CODES.EDITOR_NOT_READY,
+                message: response?.message || 'WriterDrip could not attach to the Google Docs editor.',
+                checks: response?.checks || [],
+                note: response?.note || 'Click inside the document body before starting so WriterDrip can lock onto the right editor target.'
+            });
+        }
+
+        return buildPreflightReport({
+            ready: true,
+            code: null,
+            message: response.message || 'WriterDrip is ready to start in this Google Doc.',
+            checks: response.checks || [],
+            note: response.note || 'Keep the original Google Doc tab open, keep your browser open, and keep your computer awake until the drip finishes.'
+        });
+    } catch (error) {
+        return buildPreflightReport({
+            ready: false,
+            code: error.code || ISSUE_CODES.EDITOR_NOT_READY,
+            message: error.message || 'WriterDrip could not attach to the Google Docs editor.',
+            checks: [
+                buildPreflightCheck('doc-loading', 'Google Doc is available', false, error.message || 'Wait for the document to finish loading, then try again.')
+            ],
+            note: 'If the browser or laptop sleeps, reopen the same Google Doc tab, let it reload, then run the start check again.'
+        });
     }
 }
 
@@ -704,7 +763,8 @@ function normalizeSession(tabId, rawSession) {
         attentionMessage: rawSession.attentionMessage || null,
         attentionCode: rawSession.attentionCode || null,
         lastKnownUrl: rawSession.lastKnownUrl || '',
-        lastCompletedJob: rawSession.lastCompletedJob || null
+        lastCompletedJob: rawSession.lastCompletedJob || null,
+        lastCompletedVerification: normalizeCompletionVerification(rawSession.lastCompletedVerification)
     };
 }
 
@@ -728,6 +788,7 @@ function applyRuntimeSnapshotToSession(session, runtime, options = {}) {
     const runtimeState = runtime?.state;
     if (runtimeState === SESSION_STATES.COMPLETE) {
         session.lastCompletedJob = summarizeJob(session.activeJob);
+        session.lastCompletedVerification = normalizeCompletionVerification(runtime?.completionVerification) || session.lastCompletedVerification || null;
         resetActiveRun(session, SESSION_STATES.COMPLETE);
         session.progress = 1;
         session.eta = '00:00';
@@ -765,6 +826,14 @@ async function getUiState(tabId, url = '') {
         };
     }
 
+    await withSessionLock(async () => {
+        const sessions = await readSessions();
+        const adopted = await adoptMatchingSessionForTab(tabId, url, sessions);
+        if (adopted) {
+            await writeSessions(sessions);
+        }
+    });
+
     const session = await getSessionSnapshot(tabId);
 
     return {
@@ -779,7 +848,8 @@ async function getUiState(tabId, url = '') {
         attentionCode: session.attentionCode,
         lastError: session.lastError,
         lastErrorCode: session.lastErrorCode,
-        lastCompletedJob: session.lastCompletedJob
+        lastCompletedJob: session.lastCompletedJob,
+        lastCompletedVerification: session.lastCompletedVerification
     };
 }
 
@@ -808,6 +878,25 @@ function createJob(rawJob) {
     };
 }
 
+function buildPreflightCheck(id, label, pass, detail) {
+    return {
+        id,
+        label,
+        pass: Boolean(pass),
+        detail: detail || ''
+    };
+}
+
+function buildPreflightReport(report) {
+    return {
+        ready: Boolean(report?.ready),
+        code: report?.code || null,
+        message: report?.message || '',
+        checks: Array.isArray(report?.checks) ? report.checks.map((check) => buildPreflightCheck(check.id, check.label, check.pass, check.detail)) : [],
+        note: report?.note || ''
+    };
+}
+
 function summarizeJob(job) {
     if (!job) {
         return null;
@@ -825,6 +914,26 @@ function summarizeJob(job) {
     };
 }
 
+function normalizeCompletionVerification(rawVerification) {
+    if (!rawVerification || typeof rawVerification !== 'object') {
+        return null;
+    }
+
+    return {
+        verified: Boolean(rawVerification.verified),
+        summary: rawVerification.summary || '',
+        note: rawVerification.note || '',
+        checks: Array.isArray(rawVerification.checks)
+            ? rawVerification.checks.map((check) => ({
+                id: check.id || '',
+                label: check.label || '',
+                pass: Boolean(check.pass),
+                detail: check.detail || ''
+            }))
+            : []
+    };
+}
+
 function buildPreview(text) {
     const compact = text.replace(/\s+/g, ' ').trim();
     if (compact.length <= 80) {
@@ -836,6 +945,64 @@ function buildPreview(text) {
 function countWords(text) {
     const compact = text.trim();
     return compact ? compact.split(/\s+/).length : 0;
+}
+
+function extractGoogleDocKeyFromUrl(url) {
+    try {
+        const parsed = new URL(url || '');
+        if (parsed.hostname !== 'docs.google.com') {
+            return null;
+        }
+        return parsed.pathname.match(/^\/document\/d\/([^/]+)/)?.[1] || null;
+    } catch (error) {
+        return null;
+    }
+}
+
+async function adoptMatchingSessionForTab(tabId, url, sessions = null) {
+    const targetSessions = sessions || await readSessions();
+    const currentSession = getSessionForTab(targetSessions, tabId);
+    if (currentSession.activeJob || currentSession.activeRunId) {
+        currentSession.lastKnownUrl = url || currentSession.lastKnownUrl || '';
+        return false;
+    }
+
+    const docKey = extractGoogleDocKeyFromUrl(url);
+    if (!docKey) {
+        return false;
+    }
+
+    for (const [sessionTabId, session] of Object.entries(targetSessions)) {
+        if (sessionTabId === String(tabId)) {
+            continue;
+        }
+        if (!session?.activeJob || !session?.activeRunId || session.activeJob.docKey !== docKey) {
+            continue;
+        }
+
+        let shouldAdopt = false;
+        try {
+            const existingTab = await chrome.tabs.get(Number(sessionTabId));
+            const existingDocKey = extractGoogleDocKeyFromUrl(existingTab?.url || '');
+            shouldAdopt = existingDocKey !== docKey;
+        } catch (error) {
+            shouldAdopt = true;
+        }
+
+        if (!shouldAdopt) {
+            continue;
+        }
+
+        targetSessions[String(tabId)] = normalizeSession(tabId, {
+            ...session,
+            tabId,
+            lastKnownUrl: url || session.lastKnownUrl || ''
+        });
+        delete targetSessions[sessionTabId];
+        return true;
+    }
+
+    return false;
 }
 
 function createId(prefix) {

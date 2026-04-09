@@ -59,6 +59,9 @@ async function validatePopupHtml() {
         /<script\s+src="shared\.js"><\/script>\s*<script\s+src="popup\.js"><\/script>/,
         'popup.html must load shared.js before popup.js.'
     );
+    assert.match(popupHtml, /id="preflightPanel"/, 'popup.html should keep the preflight panel.');
+    assert.match(popupHtml, /id="recoveryPanel"/, 'popup.html should keep the recovery panel.');
+    assert.match(popupHtml, /id="completionPanel"/, 'popup.html should keep the completion panel.');
 
     const backgroundSource = await fs.readFile(path.join(rootDir, 'background.js'), 'utf8');
     assert.match(
@@ -171,13 +174,20 @@ async function validateBackgroundRuntime() {
         percent: 1,
         eta: '00:00',
         actionIndex: 60,
-        totalActions: 60
+        totalActions: 60,
+        completionVerification: {
+            verified: true,
+            summary: 'Done',
+            note: 'Checked',
+            checks: [{ id: 'plan-finished', label: 'Action plan finished', pass: true, detail: 'All good' }]
+        }
     });
 
     assert.equal(session.state, hooks.SESSION_STATES.COMPLETE, 'Completed runtime snapshots should move the session to complete.');
     assert.equal(session.activeJob, null, 'Completed runtime snapshots should clear the active job.');
     assert.equal(session.activeRunId, null, 'Completed runtime snapshots should clear the active run id.');
     assert.ok(session.lastCompletedJob, 'Completed runtime snapshots should preserve a summary of the completed job.');
+    assert.equal(session.lastCompletedVerification?.verified, true, 'Completed runtime snapshots should preserve completion verification details.');
 }
 
 async function validatePopupRuntime() {
