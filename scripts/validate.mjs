@@ -60,8 +60,11 @@ async function validatePopupHtml() {
         'popup.html must load shared.js before popup.js.'
     );
     assert.match(popupHtml, /id="preflightPanel"/, 'popup.html should keep the preflight panel.');
+    assert.match(popupHtml, /id="preflightToggle"/, 'popup.html should keep the preflight panel toggle.');
     assert.match(popupHtml, /id="recoveryPanel"/, 'popup.html should keep the recovery panel.');
+    assert.match(popupHtml, /id="recoveryToggle"/, 'popup.html should keep the recovery panel toggle.');
     assert.match(popupHtml, /id="completionPanel"/, 'popup.html should keep the completion panel.');
+    assert.match(popupHtml, /id="completionToggle"/, 'popup.html should keep the completion panel toggle.');
 
     const backgroundSource = await fs.readFile(path.join(rootDir, 'background.js'), 'utf8');
     assert.match(

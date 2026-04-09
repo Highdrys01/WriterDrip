@@ -50,16 +50,22 @@ const statusHintEl = document.getElementById('statusHint');
 const preflightPanel = document.getElementById('preflightPanel');
 const preflightMetaEl = document.getElementById('preflightMeta');
 const preflightSummaryEl = document.getElementById('preflightSummary');
+const preflightToggleBtn = document.getElementById('preflightToggle');
+const preflightBodyEl = document.getElementById('preflightBody');
 const preflightListEl = document.getElementById('preflightList');
 const preflightNoteEl = document.getElementById('preflightNote');
 const recoveryPanel = document.getElementById('recoveryPanel');
 const recoveryMetaEl = document.getElementById('recoveryMeta');
 const recoverySummaryEl = document.getElementById('recoverySummary');
+const recoveryToggleBtn = document.getElementById('recoveryToggle');
+const recoveryBodyEl = document.getElementById('recoveryBody');
 const recoveryStepsEl = document.getElementById('recoverySteps');
 const recoveryNoteEl = document.getElementById('recoveryNote');
 const completionPanel = document.getElementById('completionPanel');
 const completionMetaEl = document.getElementById('completionMeta');
 const completionSummaryEl = document.getElementById('completionSummary');
+const completionToggleBtn = document.getElementById('completionToggle');
+const completionBodyEl = document.getElementById('completionBody');
 const completionListEl = document.getElementById('completionList');
 const completionNoteEl = document.getElementById('completionNote');
 const presetButtons = Array.from(document.querySelectorAll('.preset'));
@@ -149,6 +155,11 @@ let preflightState = {
     report: null,
     requestKey: ''
 };
+let panelState = {
+    preflight: { expanded: false, signature: '' },
+    recovery: { expanded: false, signature: '' },
+    completion: { expanded: false, signature: '' }
+};
 let preflightTimer = null;
 let preflightRequestId = 0;
 
@@ -219,6 +230,18 @@ function bindEvents() {
 
     clearBtn.addEventListener('click', () => {
         void clearDraft();
+    });
+
+    preflightToggleBtn.addEventListener('click', () => {
+        togglePanel('preflight');
+    });
+
+    recoveryToggleBtn.addEventListener('click', () => {
+        togglePanel('recovery');
+    });
+
+    completionToggleBtn.addEventListener('click', () => {
+        togglePanel('completion');
     });
 
     presetButtons.forEach((button) => {
@@ -360,6 +383,7 @@ function renderPreflightPanel() {
     const shouldShow = shouldShowPreflightPanel();
     preflightPanel.hidden = !shouldShow;
     if (!shouldShow) {
+        setPanelVisibility(preflightToggleBtn, preflightBodyEl, false, false, 'Show details', 'Hide details');
         return;
     }
 
@@ -367,7 +391,8 @@ function renderPreflightPanel() {
         preflightMetaEl.innerText = 'Checking';
         preflightSummaryEl.innerText = 'Running a quick start check against the current Google Doc.';
         preflightListEl.innerHTML = '';
-        preflightNoteEl.innerText = 'WriterDrip checks the current document, editor surface, and cursor before it starts.';
+        preflightNoteEl.innerText = '';
+        setPanelVisibility(preflightToggleBtn, preflightBodyEl, false, false, 'Show details', 'Hide details');
         return;
     }
 
@@ -377,6 +402,7 @@ function renderPreflightPanel() {
         preflightSummaryEl.innerText = 'Add a draft and keep this Google Doc ready to run the start check.';
         preflightListEl.innerHTML = '';
         preflightNoteEl.innerText = '';
+        setPanelVisibility(preflightToggleBtn, preflightBodyEl, false, false, 'Show details', 'Hide details');
         return;
     }
 
@@ -384,6 +410,15 @@ function renderPreflightPanel() {
     preflightSummaryEl.innerText = report.message || (report.ready ? 'WriterDrip is ready to start.' : 'WriterDrip needs one more setup step before it can start.');
     preflightListEl.innerHTML = renderCheckListMarkup(report.checks || []);
     preflightNoteEl.innerText = report.note || '';
+    const hasDetails = Boolean((report.checks && report.checks.length) || report.note);
+    const signature = [
+        report.code || 'no-code',
+        report.ready ? 'ready' : 'blocked',
+        report.checks?.length || 0,
+        report.note || ''
+    ].join('|');
+    ensurePanelState('preflight', signature, !report.ready);
+    setPanelVisibility(preflightToggleBtn, preflightBodyEl, hasDetails, panelState.preflight.expanded, 'Show details', 'Hide details');
 }
 
 function renderRecoveryPanel() {
@@ -391,6 +426,7 @@ function renderRecoveryPanel() {
     const shouldShow = Boolean((sessionState.attentionMessage || sessionState.lastError) && code);
     recoveryPanel.hidden = !shouldShow;
     if (!shouldShow) {
+        setPanelVisibility(recoveryToggleBtn, recoveryBodyEl, false, false, 'Show steps', 'Hide steps');
         return;
     }
 
@@ -399,6 +435,16 @@ function renderRecoveryPanel() {
     recoverySummaryEl.innerText = sessionState.lastError || sessionState.attentionMessage || wizard.summary;
     recoveryStepsEl.innerHTML = renderStepListMarkup(wizard.steps);
     recoveryNoteEl.innerText = wizard.note;
+    const hasDetails = Boolean((wizard.steps && wizard.steps.length) || wizard.note);
+    const signature = [
+        code || 'no-code',
+        sessionState.lastError || '',
+        sessionState.attentionMessage || '',
+        wizard.steps?.length || 0,
+        wizard.note || ''
+    ].join('|');
+    ensurePanelState('recovery', signature, !canResumeAttentionState(code) || Boolean(sessionState.lastError));
+    setPanelVisibility(recoveryToggleBtn, recoveryBodyEl, hasDetails, panelState.recovery.expanded, 'Show steps', 'Hide steps');
 }
 
 function renderCompletionPanel() {
@@ -406,6 +452,7 @@ function renderCompletionPanel() {
     const shouldShow = Boolean(sessionState.lastCompletedJob && verification);
     completionPanel.hidden = !shouldShow;
     if (!shouldShow) {
+        setPanelVisibility(completionToggleBtn, completionBodyEl, false, false, 'Show details', 'Hide details');
         return;
     }
 
@@ -413,6 +460,15 @@ function renderCompletionPanel() {
     completionSummaryEl.innerText = verification.summary || 'WriterDrip finished the last run.';
     completionListEl.innerHTML = renderCheckListMarkup(verification.checks || []);
     completionNoteEl.innerText = verification.note || '';
+    const hasDetails = Boolean((verification.checks && verification.checks.length) || verification.note);
+    const signature = [
+        verification.verified ? 'verified' : 'review',
+        verification.summary || '',
+        verification.checks?.length || 0,
+        verification.note || ''
+    ].join('|');
+    ensurePanelState('completion', signature, verification.verified === false);
+    setPanelVisibility(completionToggleBtn, completionBodyEl, hasDetails, panelState.completion.expanded, 'Show details', 'Hide details');
 }
 
 function renderActiveJob() {
@@ -718,6 +774,10 @@ function resetPreflightState() {
         report: null,
         requestKey: ''
     };
+    panelState.preflight = {
+        expanded: false,
+        signature: ''
+    };
 }
 
 function schedulePreflightRefresh(immediate = false) {
@@ -760,13 +820,14 @@ async function refreshPreflightReport(options = {}) {
     render();
 
     const requestId = ++preflightRequestId;
+    const expectedRequestKey = requestKey;
     const response = await sendBackgroundMessage('ui:preflight', {
         tabId: currentTabId,
         url: currentTabUrl,
         expectedDocKey: extractGoogleDocKey(currentTabUrl)
     });
 
-    if (requestId !== preflightRequestId) {
+    if (requestId !== preflightRequestId || expectedRequestKey !== getPreflightRequestKey()) {
         return preflightState.report;
     }
 
@@ -987,6 +1048,39 @@ function renderCheckListMarkup(items) {
           <div class="item-copy">${escapeHtml(item.detail || '')}</div>
         </div>
     `).join('');
+}
+
+function togglePanel(panelKey) {
+    const panel = panelState[panelKey];
+    if (!panel || !panel.signature) {
+        return;
+    }
+
+    panel.expanded = !panel.expanded;
+    render();
+}
+
+function ensurePanelState(panelKey, signature, defaultExpanded) {
+    const panel = panelState[panelKey];
+    if (!panel) {
+        return;
+    }
+
+    if (panel.signature !== signature) {
+        panel.signature = signature;
+        panel.expanded = defaultExpanded;
+    }
+}
+
+function setPanelVisibility(toggleEl, bodyEl, hasDetails, expanded, collapsedLabel, expandedLabel) {
+    if (!toggleEl || !bodyEl) {
+        return;
+    }
+
+    toggleEl.hidden = !hasDetails;
+    bodyEl.hidden = !hasDetails || !expanded;
+    toggleEl.innerText = expanded ? expandedLabel : collapsedLabel;
+    toggleEl.setAttribute('aria-expanded', String(Boolean(hasDetails && expanded)));
 }
 
 function renderStepListMarkup(items) {
