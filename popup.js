@@ -972,14 +972,14 @@ function normalizePreflightReport(report) {
 function buildRecoveryWizard(code) {
     if (code === 'tab-suspended') {
         return {
-            summary: 'The original Google Doc tab was suspended or the laptop slept during the run.',
+            summary: 'The original Google Doc tab was suspended, reloaded, or closed during the run.',
             steps: [
-                'Return to the original Google Doc tab.',
+                'Return to the original Google Doc tab, or reopen the same Google Doc if the tab closed.',
                 'Wait for the document to finish reloading completely.',
                 'Click once inside the main document body.',
                 canResumeAttentionState(code) ? 'Reopen WriterDrip and press Resume.' : 'Reopen WriterDrip and restart the drip if needed.'
             ],
-            note: 'If Chrome reopened the same Google Doc in a new tab after sleep or restart, WriterDrip will try to reattach that saved session.'
+            note: 'If Chrome reopened the same Google Doc in a new tab after sleep, restore, or accidental closure, WriterDrip will try to reattach that saved session.'
         };
     }
 

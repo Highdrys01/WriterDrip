@@ -104,22 +104,27 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
     void withSessionLock(async () => {
         const sessions = await readSessions();
-        if (!sessions[String(tabId)]) {
+        const session = sessions[String(tabId)];
+        if (!session) {
             return;
         }
-        delete sessions[String(tabId)];
+
+        if (!markSessionAwaitingTabReopen(session)) {
+            delete sessions[String(tabId)];
+        }
+
         await writeSessions(sessions);
     }).then(() => syncHealthAlarm()).catch((error) => {
         console.error('[WriterDrip] Failed to remove closed tab session.', error);
     });
 });
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.status !== 'complete') {
         return;
     }
 
-    recoverSessionForTab(tabId, { manual: false }).catch((error) => {
+    recoverSessionForTab(tabId, { manual: false, url: tab?.url || changeInfo.url || '' }).catch((error) => {
         console.error('[WriterDrip] Failed to recover session after tab update.', error);
     });
 });
@@ -506,6 +511,16 @@ async function recoverActiveSessions() {
 }
 
 async function recoverSessionForTab(tabId, options = {}) {
+    if (options.url) {
+        await withSessionLock(async () => {
+            const sessions = await readSessions();
+            const adopted = await adoptMatchingSessionForTab(tabId, options.url, sessions);
+            if (adopted) {
+                await writeSessions(sessions);
+            }
+        });
+    }
+
     const session = await getSessionSnapshot(tabId);
     if (!session.activeJob || !session.activeRunId) {
         await syncHealthAlarm();
@@ -803,6 +818,20 @@ function resetActiveRun(session, nextState) {
     session.lastErrorCode = null;
     session.attentionMessage = null;
     session.attentionCode = null;
+}
+
+function markSessionAwaitingTabReopen(session) {
+    if (!session?.activeJob || !session?.activeRunId) {
+        return false;
+    }
+
+    session.state = SESSION_STATES.ATTENTION;
+    session.lastError = null;
+    session.lastErrorCode = null;
+    session.attentionCode = ISSUE_CODES.TAB_SUSPENDED;
+    session.attentionMessage = 'The original Google Doc tab closed or reloaded. Reopen the same document and press Resume.';
+    session.updatedAt = Date.now();
+    return true;
 }
 
 function applyRuntimeSnapshotToSession(session, runtime, options = {}) {
@@ -1277,7 +1306,7 @@ function getRecoveryHint(code, fallback) {
         case ISSUE_CODES.PAGE_CHANGED:
             return 'Return to the intended Google Doc, review the document, then stop the current run and start again if needed.';
         case ISSUE_CODES.TAB_SUSPENDED:
-            return 'Bring the original Google Doc tab back into view, let it finish reloading, then press Resume.';
+            return 'Bring the original Google Doc tab back into view, or reopen the same Google Doc if the tab closed, let it finish loading, then press Resume.';
         case ISSUE_CODES.EDITOR_AUTO_EDIT:
             return 'Turn off Smart Compose, spelling or grammar suggestions, and substitutions in Google Docs, review the document, then stop the current run and start again.';
         case ISSUE_CODES.EDITOR_NOT_READY:
@@ -1331,6 +1360,7 @@ function inferIssueCode(message = '') {
 globalThis.__writerdripBackgroundTestHooks = Object.freeze({
     SESSION_STATES,
     createJob,
+    markSessionAwaitingTabReopen,
     normalizeSession,
     applyRuntimeSnapshotToSession
 });

@@ -21,6 +21,7 @@ Local-first, always free, and built for the Google Doc already open in your brow
 - Leave correction intensity on `Suggested` if you want the default behavior.
 - You can switch to other tabs while the original Google Doc tab keeps running.
 - Keep your browser open, keep the original Google Doc tab open, and keep your computer awake until the drip finishes.
+- If the Doc tab reloads or closes unexpectedly, reopen the same Google Doc and use `Resume` if WriterDrip offers it.
 - Reload the extension from `chrome://extensions` after pulling updates from GitHub.
 
 ## Feature Tour
@@ -61,7 +62,7 @@ Local-first, always free, and built for the Google Doc already open in your brow
 
 - No Google account connection or Google Drive / Docs API integration
 - No remote server runs or cloud processing
-- No typing after the target browser closes, the Doc tab is closed, or the computer shuts down or sleeps
+- No typing while the browser is closed, the computer is asleep, or the target Doc is unavailable; recovery still requires reopening the same Google Doc
 - No control over how Google Docs groups version history entries
 - Strongest with the Google Doc the user already opened in the browser
 - Google Docs can change editor behavior without warning
@@ -78,6 +79,12 @@ Local-first, always free, and built for the Google Doc already open in your brow
 
 - Wait for Google Docs to finish loading, then click once inside the document body again.
 - If needed, refresh the Google Doc tab and reopen the popup.
+
+### The original Doc tab reloaded or closed
+
+- Reopen the same Google Doc.
+- Wait for the page to finish loading and click once inside the document body.
+- Reopen WriterDrip and press `Resume` if it is offered.
 
 ### Google Docs changes text during a run
 

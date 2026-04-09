@@ -327,17 +327,6 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
     };
     chrome.runtime.onMessage.addListener(runtimeMessageListener);
 
-    const pageHideListener = () => {
-        if (runner.runId && (runner.state === RUNNER_STATES.RUNNING || runner.state === RUNNER_STATES.PAUSED)) {
-            void notifyBackground('runner:error', {
-                runId: runner.runId,
-                code: ISSUE_CODES.PAGE_CHANGED,
-                message: 'The page changed while a drip was active.'
-            });
-        }
-    };
-    window.addEventListener('pagehide', pageHideListener);
-
     const interferenceEvents = [
         'keydown',
         'beforeinput',
@@ -2969,7 +2958,6 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         runner.paused = false;
         runner.pauseStartedAtMs = 0;
         chrome.runtime?.onMessage?.removeListener?.(runtimeMessageListener);
-        window.removeEventListener?.('pagehide', pageHideListener);
         for (const eventName of interferenceEvents) {
             document.removeEventListener?.(eventName, handleTrustedUserInterference, true);
         }

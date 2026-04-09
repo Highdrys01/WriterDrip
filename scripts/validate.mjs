@@ -191,6 +191,27 @@ async function validateBackgroundRuntime() {
     assert.equal(session.activeRunId, null, 'Completed runtime snapshots should clear the active run id.');
     assert.ok(session.lastCompletedJob, 'Completed runtime snapshots should preserve a summary of the completed job.');
     assert.equal(session.lastCompletedVerification?.verified, true, 'Completed runtime snapshots should preserve completion verification details.');
+
+    const detachedSession = hooks.normalizeSession(2, {
+        activeJob: hooks.createJob({
+            text: 'A draft that should survive a closed tab.',
+            docKey: 'reopen-doc',
+            durationMins: 5,
+            correctionIntensity: 'medium'
+        }),
+        activeRunId: 'run_reopen',
+        state: hooks.SESSION_STATES.RUNNING,
+        progress: 0.35,
+        eta: '00:12'
+    });
+    assert.equal(
+        hooks.markSessionAwaitingTabReopen(detachedSession),
+        true,
+        'Active sessions should be preserved when the original tab closes.'
+    );
+    assert.equal(detachedSession.state, hooks.SESSION_STATES.ATTENTION, 'Closed active tabs should move into attention state.');
+    assert.equal(detachedSession.attentionCode, 'tab-suspended', 'Closed active tabs should become resumable through the suspended-tab flow.');
+    assert.ok(detachedSession.activeJob && detachedSession.activeRunId, 'Closed active tabs should keep the job and run id for later adoption.');
 }
 
 async function validatePopupRuntime() {
