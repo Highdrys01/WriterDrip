@@ -36,7 +36,7 @@
     }
 
     main {
-      max-height: 560px;
+      max-height: 620px;
       overflow-y: auto;
       padding: 12px;
     }
@@ -128,8 +128,7 @@
     }
 
     textarea,
-    input[type="number"],
-    input[type="time"] {
+    input[type="number"] {
       width: 100%;
       border-radius: 16px;
       border: 1px solid var(--border);
@@ -141,15 +140,14 @@
     }
 
     textarea {
-      min-height: 92px;
-      max-height: 150px;
+      min-height: 78px;
+      max-height: 128px;
       resize: vertical;
       line-height: 1.45;
     }
 
     textarea:focus,
     input[type="number"]:focus,
-    input[type="time"]:focus,
     button:focus-visible {
       outline: none;
       border-color: rgba(219, 94, 54, 0.55);
@@ -168,7 +166,7 @@
       background: rgba(255, 255, 255, 0.58);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 10px;
+      padding: 9px;
     }
 
     .duration-shell {
@@ -177,25 +175,7 @@
 
     .session-grid {
       display: grid;
-      gap: 10px;
-    }
-
-    .time-row {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
-      margin-top: 10px;
-    }
-
-    .time-field {
-      display: grid;
-      gap: 6px;
-    }
-
-    .time-label {
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--muted);
     }
 
     .preset-row,
@@ -503,7 +483,7 @@
     <section class="panel">
       <header class="hero">
         <h1>WriterDrip</h1>
-        <p class="intro">Type your text into the Google Doc already open in this tab with paced timing, sentence or paragraph pauses, and simple pause or resume controls.</p>
+        <p class="intro">Type your draft into the current Google Doc with paced timing, smart pauses, and simple pause or resume controls.</p>
       </header>
 
       <div class="badge-row">
@@ -517,7 +497,7 @@
             <span class="meta" id="textStats">0 words • 0 chars</span>
           </span>
           <textarea id="inputText" placeholder="Paste the text you want WriterDrip to type into the current Google Doc." aria-describedby="textHint"></textarea>
-          <span class="hint" id="textHint">WriterDrip stays bound to this Google Doc tab while the run is active.</span>
+          <span class="hint" id="textHint">Pause any time and resume later from this same Google Doc.</span>
         </label>
         <div class="utility-row" style="margin-top:10px;">
           <button id="clearBtn" class="ghost tiny" type="button">Clear draft</button>
@@ -538,7 +518,7 @@
             <button class="preset" type="button" data-duration="1440">1 day</button>
             <button class="preset" type="button" data-duration="10080">1 week</button>
           </div>
-          <span class="hint">Choose any session length from the draft minimum up to 1 week. Keep the Doc tab open and your computer awake until the run finishes.</span>
+          <span class="hint">Choose any session length from the draft minimum up to 1 week. Pause if you want to continue later.</span>
         </div>
 
         <div class="card">
@@ -554,28 +534,6 @@
           </div>
           <span class="hint" id="correctionHint">Suggested adapts to draft length, structure, and pacing once you add text.</span>
         </div>
-
-        <div class="card">
-          <div class="label-row">
-            <span>Run windows</span>
-            <span class="meta" id="scheduleMeta">Any time</span>
-          </div>
-          <div class="choice-row" id="scheduleGroup" aria-label="Run window mode">
-            <button class="choice-chip" type="button" data-schedule-mode="any">Any time</button>
-            <button class="choice-chip" type="button" data-schedule-mode="window">Daily window</button>
-          </div>
-          <div class="time-row" id="scheduleFields" hidden>
-            <label class="time-field" for="scheduleStart">
-              <span class="time-label">Start</span>
-              <input type="time" id="scheduleStart" value="09:00" step="60">
-            </label>
-            <label class="time-field" for="scheduleEnd">
-              <span class="time-label">End</span>
-              <input type="time" id="scheduleEnd" value="17:00" step="60">
-            </label>
-          </div>
-          <span class="hint" id="scheduleHint">Use a daily window if you want WriterDrip to wait and continue later instead of running in one uninterrupted block.</span>
-        </div>
       </section>
 
       <div class="action-bar">
@@ -587,6 +545,19 @@
         <span class="status-copy" id="statusText">Loading the current page.</span>
         <span class="status-hint" id="statusHint" hidden></span>
       </div>
+
+      <section class="panel-card" id="activePanel" hidden>
+        <div class="label-row">
+          <span>Active Drip</span>
+          <span class="meta" id="activeMeta">0% complete</span>
+        </div>
+        <p class="preview" id="activePreview"></p>
+        <p class="detail" id="activeDetails"></p>
+        <div class="active-actions" style="margin-top:10px;">
+          <button id="pauseBtn" class="secondary" type="button">Pause</button>
+          <button id="stopBtn" class="danger" type="button">Stop drip</button>
+        </div>
+      </section>
 
       <div class="panel-stack">
         <section class="panel-card" id="preflightPanel" hidden>
@@ -634,19 +605,6 @@
           </div>
         </section>
       </div>
-
-      <section class="panel-card" id="activePanel" hidden>
-        <div class="label-row">
-          <span>Active Drip</span>
-          <span class="meta" id="activeMeta">0% complete</span>
-        </div>
-        <p class="preview" id="activePreview"></p>
-        <p class="detail" id="activeDetails"></p>
-        <div class="active-actions" style="margin-top:10px;">
-          <button id="pauseBtn" class="secondary" type="button">Pause</button>
-          <button id="stopBtn" class="danger" type="button">Stop drip</button>
-        </div>
-      </section>
     </section>
   </main>
 

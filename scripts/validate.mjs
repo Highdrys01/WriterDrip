@@ -65,9 +65,9 @@ async function validatePopupHtml() {
     assert.match(popupHtml, /id="recoveryToggle"/, 'popup.html should keep the recovery panel toggle.');
     assert.match(popupHtml, /id="completionPanel"/, 'popup.html should keep the completion panel.');
     assert.match(popupHtml, /id="completionToggle"/, 'popup.html should keep the completion panel toggle.');
-    assert.match(popupHtml, /id="scheduleGroup"/, 'popup.html should keep the run window controls.');
-    assert.match(popupHtml, /id="scheduleStart"/, 'popup.html should keep the schedule start time input.');
-    assert.match(popupHtml, /id="scheduleEnd"/, 'popup.html should keep the schedule end time input.');
+    assert.doesNotMatch(popupHtml, /id="scheduleGroup"/, 'popup.html should not ship the removed run window controls.');
+    assert.doesNotMatch(popupHtml, /id="scheduleStart"/, 'popup.html should not keep the removed schedule start time input.');
+    assert.doesNotMatch(popupHtml, /id="scheduleEnd"/, 'popup.html should not keep the removed schedule end time input.');
 
     const backgroundSource = await fs.readFile(path.join(rootDir, 'background.js'), 'utf8');
     assert.match(
@@ -166,8 +166,7 @@ async function validateBackgroundRuntime() {
             text: 'A draft that should finish cleanly.',
             docKey: 'test-doc',
             durationMins: 5,
-            correctionIntensity: 'medium',
-            schedule: { enabled: true, startTime: '09:00', endTime: '17:00' }
+            correctionIntensity: 'medium'
         }),
         activeRunId: 'run_test',
         state: hooks.SESSION_STATES.RUNNING,
@@ -195,17 +194,6 @@ async function validateBackgroundRuntime() {
     assert.equal(session.activeRunId, null, 'Completed runtime snapshots should clear the active run id.');
     assert.ok(session.lastCompletedJob, 'Completed runtime snapshots should preserve a summary of the completed job.');
     assert.equal(session.lastCompletedVerification?.verified, true, 'Completed runtime snapshots should preserve completion verification details.');
-    assert.equal(
-        hooks.createJob({
-            text: 'A draft with a window.',
-            docKey: 'window-doc',
-            durationMins: 5,
-            correctionIntensity: 'medium',
-            schedule: { enabled: true, startTime: '09:00', endTime: '17:00' }
-        })?.schedule?.startMinute,
-        540,
-        'createJob should normalize daily window schedules.'
-    );
 
     const detachedSession = hooks.normalizeSession(2, {
         activeJob: hooks.createJob({
@@ -227,6 +215,29 @@ async function validateBackgroundRuntime() {
     assert.equal(detachedSession.state, hooks.SESSION_STATES.ATTENTION, 'Closed active tabs should move into attention state.');
     assert.equal(detachedSession.attentionCode, 'tab-suspended', 'Closed active tabs should become resumable through the suspended-tab flow.');
     assert.ok(detachedSession.activeJob && detachedSession.activeRunId, 'Closed active tabs should keep the job and run id for later adoption.');
+
+    const pausedSession = hooks.normalizeSession(3, {
+        activeJob: {
+            text: 'A paused draft.',
+            docKey: 'paused-doc',
+            durationMins: 5,
+            correctionIntensity: 'high',
+            schedule: { enabled: true, startTime: '09:00', endTime: '17:00' }
+        },
+        activeRunId: 'run_paused',
+        state: hooks.SESSION_STATES.PAUSED
+    });
+    assert.equal(
+        Object.prototype.hasOwnProperty.call(pausedSession.activeJob, 'schedule'),
+        false,
+        'Legacy scheduled jobs should be normalized away when an older session is reopened.'
+    );
+    assert.equal(
+        hooks.markSessionAwaitingTabReopen(pausedSession),
+        true,
+        'Paused sessions should stay recoverable when the original tab closes.'
+    );
+    assert.equal(pausedSession.attentionCode, 'tab-suspended', 'Paused reopened sessions should guide the user back through the suspended-tab recovery flow.');
 }
 
 async function validatePopupRuntime() {
@@ -355,15 +366,6 @@ async function validatePlanner() {
     assert.equal(shared.normalizeDurationMins('2.2', 1), 3, 'Duration normalization should round partial minutes up.');
     assert.equal(shared.normalizeDurationMins('0.2', 5), 5, 'Duration normalization should respect the current draft minimum.');
     assert.equal(shared.normalizeDurationMins('abc', 5), null, 'Duration normalization should reject invalid numeric input.');
-    assert.equal(shared.normalizeDailySchedule({ enabled: true, startTime: '09:00', endTime: '17:00' })?.startMinute, 540, 'Daily schedules should normalize the start time.');
-    assert.equal(shared.normalizeDailySchedule({ enabled: true, startTime: '09:00', endTime: '09:00' }), null, 'Daily schedules should reject zero-length windows.');
-    const scheduleInactive = shared.getDailyScheduleStatus({ enabled: true, startTime: '09:00', endTime: '17:00' }, new Date(2026, 3, 9, 8, 30, 0));
-    assert.equal(scheduleInactive.enabled, true, 'Daily schedules should report enabled windows.');
-    assert.equal(scheduleInactive.active, false, 'Daily schedules should report inactive time outside the configured window.');
-    const scheduleActive = shared.getDailyScheduleStatus({ enabled: true, startTime: '09:00', endTime: '17:00' }, new Date(2026, 3, 9, 10, 15, 0));
-    assert.equal(scheduleActive.active, true, 'Daily schedules should report active time inside the configured window.');
-    const overnightActive = shared.getDailyScheduleStatus({ enabled: true, startTime: '22:00', endTime: '06:00' }, new Date(2026, 3, 9, 23, 10, 0));
-    assert.equal(overnightActive.active, true, 'Overnight windows should stay active after the evening start time.');
 
     const balancedDraftAnalysis = shared.analyzeDraftText(
         'This draft is long enough to feel like normal prose, but it is not massive. It has a few sentences, some commas, and a steady rhythm throughout the paragraph.',
@@ -571,7 +573,12 @@ function createPopupSandbox() {
             onChanged: { addListener() { } },
             local: {
                 async get(key) { return { [key]: storageState[key] }; },
-                async set(values) { Object.assign(storageState, values); }
+                async set(values) { Object.assign(storageState, values); },
+                async remove(keys) {
+                    for (const key of Array.isArray(keys) ? keys : [keys]) {
+                        delete storageState[key];
+                    }
+                }
             }
         },
         tabs: {

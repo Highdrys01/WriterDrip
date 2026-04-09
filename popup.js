@@ -16,9 +16,6 @@ const {
     MAX_DURATION_MINS,
     normalizeCorrectionIntensity,
     normalizeDurationMins,
-    normalizeDailySchedule,
-    getDailyScheduleStatus,
-    formatMinuteOfDay,
     sanitizeDraftText,
     analyzeDraftText
 } = Shared;
@@ -42,11 +39,6 @@ const textStats = document.getElementById('textStats');
 const durationMeta = document.getElementById('durationMeta');
 const correctionMeta = document.getElementById('correctionMeta');
 const correctionHint = document.getElementById('correctionHint');
-const scheduleMeta = document.getElementById('scheduleMeta');
-const scheduleHint = document.getElementById('scheduleHint');
-const scheduleFields = document.getElementById('scheduleFields');
-const scheduleStartInput = document.getElementById('scheduleStart');
-const scheduleEndInput = document.getElementById('scheduleEnd');
 const activePanel = document.getElementById('activePanel');
 const activeMeta = document.getElementById('activeMeta');
 const activePreview = document.getElementById('activePreview');
@@ -78,7 +70,6 @@ const completionListEl = document.getElementById('completionList');
 const completionNoteEl = document.getElementById('completionNote');
 const presetButtons = Array.from(document.querySelectorAll('.preset'));
 const correctionButtons = Array.from(document.querySelectorAll('[data-intensity]'));
-const scheduleModeButtons = Array.from(document.querySelectorAll('[data-schedule-mode]'));
 
 const SAFE_ATTENTION_RESUME_CODES = new Set([
     'editor-not-ready',
@@ -159,9 +150,6 @@ let currentPageKind = PAGE_KINDS.MISSING;
 let uiBusy = false;
 let sessionState = createDefaultSessionState();
 let selectedCorrectionIntensity = 'suggested';
-let selectedScheduleMode = 'any';
-let selectedScheduleStart = '09:00';
-let selectedScheduleEnd = '17:00';
 let preflightState = {
     status: 'idle',
     report: null,
@@ -180,7 +168,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     syncMinimumDuration(true);
     updatePresetSelection();
     updateCorrectionUi();
-    updateScheduleUi();
     syncButtons();
     bindEvents();
     await loadActiveTab();
@@ -200,8 +187,6 @@ function createDefaultSessionState(overrides = {}) {
         lastErrorCode: null,
         lastCompletedJob: null,
         lastCompletedVerification: null,
-        pauseMode: null,
-        scheduleStatus: null,
         ...overrides
     };
 }
@@ -212,7 +197,7 @@ function bindEvents() {
         syncMinimumDuration();
         updateCorrectionUi();
         syncButtons();
-        schedulePreflightRefresh();
+        queuePreflightRefresh();
         await saveDraft();
     });
 
@@ -220,7 +205,7 @@ function bindEvents() {
         updatePresetSelection();
         updateCorrectionUi();
         syncButtons();
-        schedulePreflightRefresh();
+        queuePreflightRefresh();
         await saveDraft();
     });
 
@@ -229,7 +214,7 @@ function bindEvents() {
         updatePresetSelection();
         updateCorrectionUi();
         syncButtons();
-        schedulePreflightRefresh(true);
+        queuePreflightRefresh(true);
         await saveDraft();
     });
 
@@ -274,7 +259,7 @@ function bindEvents() {
             updatePresetSelection();
             updateCorrectionUi();
             syncButtons();
-            schedulePreflightRefresh();
+            queuePreflightRefresh();
             await saveDraft();
             durationInput.focus();
         });
@@ -284,35 +269,9 @@ function bindEvents() {
         button.addEventListener('click', async () => {
             selectedCorrectionIntensity = normalizeCorrectionIntensity(button.dataset.intensity);
             updateCorrectionUi();
-            schedulePreflightRefresh();
+            queuePreflightRefresh();
             await saveDraft();
         });
-    });
-
-    scheduleModeButtons.forEach((button) => {
-        button.addEventListener('click', async () => {
-            selectedScheduleMode = button.dataset.scheduleMode === 'window' ? 'window' : 'any';
-            updateScheduleUi();
-            schedulePreflightRefresh(true);
-            syncButtons();
-            await saveDraft();
-        });
-    });
-
-    scheduleStartInput.addEventListener('input', async () => {
-        selectedScheduleStart = scheduleStartInput.value || selectedScheduleStart;
-        updateScheduleUi();
-        schedulePreflightRefresh(true);
-        syncButtons();
-        await saveDraft();
-    });
-
-    scheduleEndInput.addEventListener('input', async () => {
-        selectedScheduleEnd = scheduleEndInput.value || selectedScheduleEnd;
-        updateScheduleUi();
-        schedulePreflightRefresh(true);
-        syncButtons();
-        await saveDraft();
     });
 
     chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -334,7 +293,7 @@ function bindEvents() {
         currentPageKind = detectPageKind(currentTabUrl);
         applyPageBadge();
         render();
-        schedulePreflightRefresh(true);
+        queuePreflightRefresh(true);
     });
 }
 
@@ -352,13 +311,10 @@ async function loadActiveTab() {
     currentPageKind = detectPageKind(currentTabUrl);
     applyPageBadge();
 
-    const [draftText, draftDuration, storedCorrectionIntensity, storedScheduleMode, storedScheduleStart, storedScheduleEnd] = await Promise.all([
+    const [draftText, draftDuration, storedCorrectionIntensity] = await Promise.all([
         readLocal(`dripText_${currentTabId}`),
         readLocal(`dripDuration_${currentTabId}`),
-        readLocal(`dripCorrectionIntensity_${currentTabId}`),
-        readLocal(`dripScheduleMode_${currentTabId}`),
-        readLocal(`dripScheduleStart_${currentTabId}`),
-        readLocal(`dripScheduleEnd_${currentTabId}`)
+        readLocal(`dripCorrectionIntensity_${currentTabId}`)
     ]);
 
     if (typeof draftText === 'string') {
@@ -368,19 +324,14 @@ async function loadActiveTab() {
         durationInput.value = draftDuration;
     }
     selectedCorrectionIntensity = normalizeCorrectionIntensity(storedCorrectionIntensity);
-    selectedScheduleMode = storedScheduleMode === 'window' ? 'window' : 'any';
-    selectedScheduleStart = normalizeTimeInput(storedScheduleStart) || selectedScheduleStart;
-    selectedScheduleEnd = normalizeTimeInput(storedScheduleEnd) || selectedScheduleEnd;
-    scheduleStartInput.value = selectedScheduleStart;
-    scheduleEndInput.value = selectedScheduleEnd;
 
     updateTextStats();
     syncMinimumDuration(true);
     updatePresetSelection();
     updateCorrectionUi();
-    updateScheduleUi();
     await refreshSessionState();
-    schedulePreflightRefresh(true);
+    await clearLegacyScheduleDraftState();
+    queuePreflightRefresh(true);
 }
 
 async function refreshSessionState() {
@@ -408,7 +359,7 @@ async function refreshSessionState() {
     }
 
     render();
-    schedulePreflightRefresh(true);
+    queuePreflightRefresh(true);
 }
 
 function normalizeUiState(rawState) {
@@ -424,9 +375,7 @@ function normalizeUiState(rawState) {
         lastError: rawState?.lastError || null,
         lastErrorCode: rawState?.lastErrorCode || null,
         lastCompletedJob: rawState?.lastCompletedJob || null,
-        lastCompletedVerification: rawState?.lastCompletedVerification || null,
-        pauseMode: rawState?.pauseMode || null,
-        scheduleStatus: rawState?.scheduleStatus || null
+        lastCompletedVerification: rawState?.lastCompletedVerification || null
     });
 }
 
@@ -437,7 +386,6 @@ function render() {
     renderCompletionPanel();
     renderStatus();
     updateCorrectionUi();
-    updateScheduleUi();
     syncButtons();
 }
 
@@ -545,14 +493,8 @@ function renderActiveJob() {
     const correctionLabel = activeJob.correctionIntensity
         ? ` • ${formatCorrectionIntensity(activeJob.correctionIntensity)} corrections`
         : '';
-    const scheduleLabel = activeJob.schedule ? ` • ${formatScheduleWindowLabel(activeJob.schedule)}` : '';
-    const nextWindowLabel = sessionState.pauseMode === 'schedule' && sessionState.scheduleStatus?.nextStartAt
-        ? ` • next ${formatLocalDateTime(sessionState.scheduleStatus.nextStartAt)}`
-        : '';
-    activeDetails.innerText = `${formatDuration(activeJob.durationMins)} • ${activeJob.wordCount} words • ${activeJob.charCount} chars${correctionLabel}${scheduleLabel}${nextWindowLabel} • ETA ${sessionState.eta}`;
-    activeMeta.innerText = sessionState.pauseMode === 'schedule' && sessionState.scheduleStatus?.enabled && !sessionState.scheduleStatus.active
-        ? 'Waiting for window'
-        : sessionState.state === 'attention'
+    activeDetails.innerText = `${formatDuration(activeJob.durationMins)} • ${activeJob.wordCount} words • ${activeJob.charCount} chars${correctionLabel} • ETA ${sessionState.eta}`;
+    activeMeta.innerText = sessionState.state === 'attention'
         ? canResumeAttentionState(sessionState.attentionCode) ? 'Needs attention' : 'Restart required'
         : sessionState.isPaused
             ? 'Paused'
@@ -578,20 +520,10 @@ function renderStatus() {
     }
 
     if (sessionState.activeJob && sessionState.isPaused) {
-        if (sessionState.pauseMode === 'schedule' && sessionState.scheduleStatus?.enabled && !sessionState.scheduleStatus.active) {
-            setStatus({
-                title: 'Waiting for next window',
-                message: `This run is paused until ${formatLocalDateTime(sessionState.scheduleStatus.nextStartAt)}.`,
-                hint: 'WriterDrip will continue when that daily window opens again, as long as the browser, Google Doc tab, and computer are available.',
-                tone: 'muted'
-            });
-            return;
-        }
-
         setStatus({
             title: 'Drip paused',
             message: `${sessionState.eta} remaining on the active run.`,
-            hint: 'Press Resume when the Google Doc tab is ready again.',
+            hint: 'You can leave this paused and come back later. Reopen the same Google Doc and press Resume when you are ready.',
             tone: 'muted'
         });
         return;
@@ -601,7 +533,7 @@ function renderStatus() {
         setStatus({
             title: 'Typing in progress',
             message: `${Math.floor((sessionState.progress || 0) * 100)}% complete with ${sessionState.eta} remaining.`,
-            hint: 'You can switch to other tabs. WriterDrip stays bound to the original Google Doc tab.',
+            hint: 'You can switch to other tabs, or pause now and resume later from the same Google Doc.',
             tone: 'muted'
         });
         return;
@@ -625,16 +557,6 @@ function renderStatus() {
     const draftAnalysis = getDraftAnalysis();
     const minimumDuration = draftAnalysis.minimumDurationMins;
     const selectedDuration = Number.parseFloat(durationInput.value);
-    const draftScheduleStatus = getDraftScheduleStatus();
-    if (selectedScheduleMode === 'window' && !buildDraftSchedule()) {
-        setStatus({
-            title: 'Set a valid window',
-            message: 'Pick different start and end times for the daily run window.',
-            hint: 'WriterDrip uses that daily window when the browser, Google Doc tab, and computer are available.',
-            tone: 'warn'
-        });
-        return;
-    }
 
     if (draftAnalysis.trimmed && (!Number.isFinite(selectedDuration) || selectedDuration < minimumDuration)) {
         setStatus({
@@ -642,16 +564,6 @@ function renderStatus() {
             message: `This draft needs at least ${formatDuration(minimumDuration)} to run cleanly.`,
             hint: 'WriterDrip uses a draft-sized minimum so it has enough time to finish the full typing process.',
             tone: 'warn'
-        });
-        return;
-    }
-
-    if (draftAnalysis.trimmed && draftScheduleStatus.enabled && !draftScheduleStatus.active) {
-        setStatus({
-            title: 'Starts in the next window',
-            message: `This run will wait until ${formatLocalDateTime(draftScheduleStatus.nextStartAt)} before typing.`,
-            hint: 'WriterDrip still runs locally, so the browser, Google Doc tab, and computer need to be available when that window opens.',
-            tone: 'muted'
         });
         return;
     }
@@ -680,7 +592,7 @@ function renderStatus() {
     setStatus({
         title: 'Ready to start',
         message: 'WriterDrip is ready in the current Google Doc.',
-        hint: 'Click inside the document body first if Google Docs just loaded.',
+        hint: 'Click inside the document body first if Google Docs just loaded. You can pause later if you want to continue another time.',
         tone: 'muted'
     });
 }
@@ -691,15 +603,13 @@ function syncButtons() {
     const durationValue = Number.parseFloat(durationInput.value);
     const minimumDuration = draftAnalysis.minimumDurationMins;
     const validDuration = Number.isFinite(durationValue) && durationValue >= minimumDuration && durationValue <= MAX_DURATION_MINS;
-    const validSchedule = selectedScheduleMode !== 'window' || Boolean(buildDraftSchedule());
     const hasActiveTab = Boolean(currentTabId);
     const hasActiveRun = Boolean(sessionState.activeJob);
     const onGoogleDoc = currentPageKind === PAGE_KINDS.GOOGLE_DOC;
-    const scheduleWaiting = sessionState.pauseMode === 'schedule' && sessionState.scheduleStatus?.enabled && !sessionState.scheduleStatus.active;
 
-    startBtn.disabled = uiBusy || !onGoogleDoc || !hasActiveTab || !hasDraft || !validDuration || !validSchedule || hasActiveRun;
+    startBtn.disabled = uiBusy || !onGoogleDoc || !hasActiveTab || !hasDraft || !validDuration || hasActiveRun;
     clearBtn.disabled = uiBusy || inputText.value.length === 0;
-    pauseBtn.disabled = uiBusy || !hasActiveRun || !onGoogleDoc || scheduleWaiting || (sessionState.state === 'attention' && !canResumeAttentionState(sessionState.attentionCode));
+    pauseBtn.disabled = uiBusy || !hasActiveRun || !onGoogleDoc || (sessionState.state === 'attention' && !canResumeAttentionState(sessionState.attentionCode));
     stopBtn.disabled = uiBusy || !hasActiveRun;
 
     startBtn.innerText = uiBusy ? 'Working...' : hasActiveRun ? 'Drip active' : 'Start drip';
@@ -719,13 +629,8 @@ async function startNow() {
     }
 
     await withUiBusy(async () => {
-        const scheduleStatus = getDailyScheduleStatus(job.schedule);
-        const requiresImmediatePreflight = !scheduleStatus.enabled || scheduleStatus.active;
-        const preflightReport = requiresImmediatePreflight
-            ? await refreshPreflightReport({ force: true })
-            : null;
-
-        if (requiresImmediatePreflight && !preflightReport?.ready) {
+        const preflightReport = await refreshPreflightReport({ force: true });
+        if (!preflightReport?.ready) {
             setStatus(buildIssueStatus(preflightReport?.code, preflightReport?.message || 'WriterDrip is not ready to start yet.', preflightReport?.note || 'Click inside the document body and run the start check again.', 'warn'));
             return;
         }
@@ -794,7 +699,6 @@ function collectDraftJob() {
     const text = draftAnalysis.trimmed;
     const durationMins = normalizeDurationFieldValue({ clampToMinimum: false });
     const minimumDuration = draftAnalysis.minimumDurationMins;
-    const schedule = buildDraftSchedule();
 
     if (sessionState.activeJob) {
         setStatus('A drip is already active in this tab. Stop it before starting another.', 'warn');
@@ -804,17 +708,6 @@ function collectDraftJob() {
     if (!text) {
         setStatus('Paste the text you want WriterDrip to type first.', 'warn');
         inputText.focus();
-        return null;
-    }
-
-    if (selectedScheduleMode === 'window' && !schedule) {
-        setStatus({
-            title: 'Set a valid window',
-            message: 'Pick different start and end times for the daily run window.',
-            hint: 'WriterDrip will use that daily window when the browser, Google Doc tab, and computer are available.',
-            tone: 'warn'
-        });
-        scheduleStartInput.focus();
         return null;
     }
 
@@ -840,7 +733,6 @@ function collectDraftJob() {
         preset: detectPreset(durationMins),
         docKey: extractGoogleDocKey(currentTabUrl),
         correctionIntensity: normalizeCorrectionIntensity(selectedCorrectionIntensity),
-        schedule
     };
 }
 
@@ -852,10 +744,9 @@ async function handleBackgroundResponse(response, successMessage = '') {
 
     sessionState = normalizeUiState(response.state);
     render();
-    schedulePreflightRefresh(true);
+    queuePreflightRefresh(true);
 
-    const scheduleWaiting = sessionState.pauseMode === 'schedule' && sessionState.scheduleStatus?.enabled && !sessionState.scheduleStatus.active;
-    if (successMessage && !scheduleWaiting && !sessionState.lastError && !sessionState.attentionMessage && sessionState.state !== 'attention') {
+    if (successMessage && !sessionState.lastError && !sessionState.attentionMessage && sessionState.state !== 'attention') {
         setStatus(successMessage, 'muted');
     }
 
@@ -863,11 +754,8 @@ async function handleBackgroundResponse(response, successMessage = '') {
 }
 
 function shouldShowPreflightPanel() {
-    const draftScheduleStatus = getDraftScheduleStatus();
     return currentPageKind === PAGE_KINDS.GOOGLE_DOC &&
         Boolean(getDraftAnalysis().trimmed) &&
-        (selectedScheduleMode !== 'window' || Boolean(buildDraftSchedule())) &&
-        (!draftScheduleStatus.enabled || draftScheduleStatus.active) &&
         !sessionState.activeJob &&
         !sessionState.attentionMessage &&
         !sessionState.lastError;
@@ -875,7 +763,6 @@ function shouldShowPreflightPanel() {
 
 function getPreflightRequestKey() {
     const draftAnalysis = getDraftAnalysis();
-    const schedule = buildDraftSchedule();
     return [
         currentTabId || 'no-tab',
         currentPageKind || 'no-page-kind',
@@ -883,9 +770,7 @@ function getPreflightRequestKey() {
         draftAnalysis.charCount,
         draftAnalysis.wordCount,
         draftAnalysis.minimumDurationMins,
-        durationInput.value || '',
-        schedule?.startMinute ?? 'no-schedule',
-        schedule?.endMinute ?? 'no-schedule'
+        durationInput.value || ''
     ].join('|');
 }
 
@@ -906,7 +791,7 @@ function resetPreflightState() {
     };
 }
 
-function schedulePreflightRefresh(immediate = false) {
+function queuePreflightRefresh(immediate = false) {
     if (preflightTimer) {
         clearTimeout(preflightTimer);
         preflightTimer = null;
@@ -1489,45 +1374,6 @@ function updateCorrectionUi() {
     correctionHint.innerText = `${buildCorrectionModeDescription(effectiveIntensity)} Suggested for this draft: ${formatCorrectionIntensity(suggestedIntensity)}. ${draftAnalysis.suggestedCorrectionReason || ''}`.trim();
 }
 
-function updateScheduleUi() {
-    scheduleModeButtons.forEach((button) => {
-        button.dataset.selected = String(button.dataset.scheduleMode === selectedScheduleMode);
-    });
-
-    const schedule = buildDraftSchedule();
-    const draftReady = Boolean(getDraftAnalysis().trimmed);
-    const scheduleStatus = getDraftScheduleStatus();
-
-    scheduleFields.hidden = selectedScheduleMode !== 'window';
-    scheduleStartInput.value = selectedScheduleStart;
-    scheduleEndInput.value = selectedScheduleEnd;
-
-    if (!schedule) {
-        if (selectedScheduleMode === 'window') {
-            scheduleMeta.innerText = 'Set window';
-            scheduleHint.innerText = 'Pick different start and end times for the daily window. WriterDrip uses that window each day when the browser and Doc are available.';
-            return;
-        }
-
-        scheduleMeta.innerText = 'Any time';
-        scheduleHint.innerText = 'Use a daily window if you want WriterDrip to wait and continue later instead of running in one uninterrupted block.';
-        return;
-    }
-
-    scheduleMeta.innerText = formatScheduleWindowLabel(schedule);
-    if (!draftReady) {
-        scheduleHint.innerText = 'WriterDrip will only type inside this daily window once you add a draft and start the run.';
-        return;
-    }
-
-    if (scheduleStatus.active) {
-        scheduleHint.innerText = 'The current daily window is open, so WriterDrip can run immediately and pause again after this window ends.';
-        return;
-    }
-
-    scheduleHint.innerText = `WriterDrip will wait until ${formatLocalDateTime(scheduleStatus.nextStartAt)} before typing again. It still needs the browser, Doc tab, and computer available at that time.`;
-}
-
 function buildSuggestedCorrectionHint(draftAnalysis, intensity) {
     if (draftAnalysis?.suggestedCorrectionReason) {
         return draftAnalysis.suggestedCorrectionReason;
@@ -1572,69 +1418,6 @@ function normalizeDurationFieldValue(options = {}) {
         durationInput.value = String(normalized);
     }
     return normalized;
-}
-
-function buildDraftSchedule() {
-    if (selectedScheduleMode !== 'window') {
-        return null;
-    }
-
-    return normalizeDailySchedule({
-        enabled: true,
-        startTime: selectedScheduleStart,
-        endTime: selectedScheduleEnd
-    });
-}
-
-function getDraftScheduleStatus() {
-    return getDailyScheduleStatus(buildDraftSchedule());
-}
-
-function formatScheduleWindowLabel(schedule) {
-    const normalized = normalizeDailySchedule(schedule);
-    if (!normalized) {
-        return 'Any time';
-    }
-
-    return `${formatClockLabel(normalized.startMinute)}-${formatClockLabel(normalized.endMinute)}`;
-}
-
-function formatClockLabel(minuteOfDay) {
-    const raw = formatMinuteOfDay(minuteOfDay);
-    if (!raw) {
-        return '';
-    }
-
-    const [hourText, minuteText] = raw.split(':');
-    const hours = Number.parseInt(hourText, 10);
-    const minutes = Number.parseInt(minuteText, 10);
-    const suffix = hours >= 12 ? 'PM' : 'AM';
-    const twelveHour = hours % 12 || 12;
-    return `${twelveHour}:${String(minutes).padStart(2, '0')} ${suffix}`;
-}
-
-function formatLocalDateTime(timestamp) {
-    if (!timestamp) {
-        return 'the next window';
-    }
-
-    const target = new Date(timestamp);
-    const sameDay = target.toDateString() === new Date().toDateString();
-    const formatter = new Intl.DateTimeFormat(undefined, {
-        weekday: sameDay ? undefined : 'short',
-        hour: 'numeric',
-        minute: '2-digit'
-    });
-    return formatter.format(target);
-}
-
-function normalizeTimeInput(value) {
-    if (typeof value !== 'string') {
-        return null;
-    }
-
-    const trimmed = value.trim();
-    return /^\d{2}:\d{2}$/.test(trimmed) ? trimmed : null;
 }
 
 function inferIssueCode(message = '') {
@@ -1735,11 +1518,20 @@ async function saveDraft() {
     await chrome.storage.local.set({
         [`dripText_${currentTabId}`]: inputText.value,
         [`dripDuration_${currentTabId}`]: durationInput.value,
-        [`dripCorrectionIntensity_${currentTabId}`]: normalizeCorrectionIntensity(selectedCorrectionIntensity),
-        [`dripScheduleMode_${currentTabId}`]: selectedScheduleMode,
-        [`dripScheduleStart_${currentTabId}`]: selectedScheduleStart,
-        [`dripScheduleEnd_${currentTabId}`]: selectedScheduleEnd
+        [`dripCorrectionIntensity_${currentTabId}`]: normalizeCorrectionIntensity(selectedCorrectionIntensity)
     });
+}
+
+async function clearLegacyScheduleDraftState() {
+    if (!currentTabId) {
+        return;
+    }
+
+    await chrome.storage.local.remove([
+        `dripScheduleMode_${currentTabId}`,
+        `dripScheduleStart_${currentTabId}`,
+        `dripScheduleEnd_${currentTabId}`
+    ]);
 }
 
 async function readLocal(key) {

@@ -14,14 +14,11 @@ if (!Shared) {
 }
 
 const {
-    MIN_DURATION_MINS,
     MAX_DURATION_MINS,
     normalizeCorrectionIntensity,
     sanitizeDraftText,
     getMinimumDurationMins,
-    normalizeDurationMins,
-    normalizeDailySchedule,
-    getDailyScheduleStatus
+    normalizeDurationMins
 } = Shared;
 
 const SESSIONS_KEY = 'writerdripTabSessions';
@@ -35,11 +32,6 @@ const SESSION_STATES = {
     COMPLETE: 'complete'
 };
 const AUTO_RECOVERY_STATES = new Set([
-    SESSION_STATES.STARTING,
-    SESSION_STATES.RUNNING
-]);
-const AUTO_SCHEDULE_RECOVERY_STATES = new Set([
-    SESSION_STATES.PAUSED,
     SESSION_STATES.STARTING,
     SESSION_STATES.RUNNING
 ]);
@@ -199,50 +191,6 @@ async function handleRunStart(tabId, url, rawJob) {
         return buildErrorResponse(ISSUE_CODES.INVALID_JOB, `Enter text and choose a duration between ${formatDurationMins(minimumDurationMins)} and ${formatDurationMins(MAX_DURATION_MINS)}.`);
     }
 
-    const scheduleStatus = getScheduleStatusForJob(job);
-    if (scheduleStatus.enabled && !scheduleStatus.active) {
-        let scheduledRunId = null;
-        await withSessionLock(async () => {
-            const sessions = await readSessions();
-            const session = getSessionForTab(sessions, tabId);
-            session.lastKnownUrl = url || session.lastKnownUrl || '';
-
-            if (session.activeJob || session.activeRunId) {
-                return;
-            }
-
-            session.activeJob = job;
-            session.activeRunId = createId('run');
-            scheduledRunId = session.activeRunId;
-            session.state = SESSION_STATES.PAUSED;
-            session.pauseMode = 'schedule';
-            session.progress = 0;
-            session.eta = durationToClock(job.durationMins * 60);
-            session.checkpointActionIndex = 0;
-            session.totalActions = 0;
-            session.lastHeartbeatAt = 0;
-            session.updatedAt = Date.now();
-            session.lastError = null;
-            session.lastErrorCode = null;
-            session.attentionMessage = null;
-            session.attentionCode = null;
-            session.lastCompletedJob = null;
-            session.lastCompletedVerification = null;
-            session.scheduleNextStartAt = scheduleStatus.nextStartAt || null;
-            await writeSessions(sessions);
-        });
-
-        if (!scheduledRunId) {
-            return buildErrorResponse(ISSUE_CODES.ACTIVE_RUN_EXISTS, 'A drip is already active in this tab. Pause or stop it first.');
-        }
-
-        await syncHealthAlarm();
-        return {
-            ok: true,
-            state: await getUiState(tabId, url)
-        };
-    }
-
     const preflightReport = await runPreflightCheck(tabId, job.docKey);
     if (!preflightReport.ready) {
         return buildErrorResponse(preflightReport.code || ISSUE_CODES.EDITOR_NOT_READY, preflightReport.message || 'Open the Google Doc, click inside the editor, and try again.');
@@ -262,7 +210,6 @@ async function handleRunStart(tabId, url, rawJob) {
         session.activeJob = job;
         session.activeRunId = createId('run');
         session.state = SESSION_STATES.STARTING;
-        session.pauseMode = null;
         session.progress = 0;
         session.eta = durationToClock(job.durationMins * 60);
         session.checkpointActionIndex = 0;
@@ -275,7 +222,6 @@ async function handleRunStart(tabId, url, rawJob) {
         session.attentionCode = null;
         session.lastCompletedJob = null;
         session.lastCompletedVerification = null;
-        session.scheduleNextStartAt = null;
         runPayload = {
             runId: session.activeRunId,
             job
@@ -356,14 +302,6 @@ async function handlePauseToggle(tabId) {
     }
 
     if (session.state === SESSION_STATES.PAUSED) {
-        const scheduleStatus = getScheduleStatusForJob(session.activeJob);
-        if (session.pauseMode === 'schedule' && scheduleStatus.enabled && !scheduleStatus.active) {
-            return {
-                ok: true,
-                state: await getUiState(tabId)
-            };
-        }
-
         try {
             const response = await sendRunnerCommand(tabId, { type: 'writerdrip:resume-job', runId: session.activeRunId });
             await withSessionLock(async () => {
@@ -374,13 +312,11 @@ async function handlePauseToggle(tabId) {
                 }
 
                 nextSession.state = response.runtime?.state || SESSION_STATES.RUNNING;
-                nextSession.pauseMode = null;
                 nextSession.lastError = null;
                 nextSession.lastErrorCode = null;
                 nextSession.attentionMessage = null;
                 nextSession.attentionCode = null;
                 nextSession.lastHeartbeatAt = Date.now();
-                nextSession.scheduleNextStartAt = 0;
                 nextSession.updatedAt = Date.now();
                 await writeSessions(sessions);
             });
@@ -409,13 +345,11 @@ async function handlePauseToggle(tabId) {
         }
 
         nextSession.state = response.runtime?.state || SESSION_STATES.PAUSED;
-        nextSession.pauseMode = 'manual';
         nextSession.lastError = null;
         nextSession.lastErrorCode = null;
         nextSession.attentionMessage = null;
         nextSession.attentionCode = null;
         nextSession.lastHeartbeatAt = Date.now();
-        nextSession.scheduleNextStartAt = 0;
         nextSession.updatedAt = Date.now();
         await writeSessions(sessions);
     });
@@ -491,13 +425,11 @@ async function handleRunnerProgress(tabId, payload) {
         }
 
         session.state = payload.state || session.state || SESSION_STATES.RUNNING;
-        session.pauseMode = null;
         session.progress = clampNumber(payload.percent, 0, 1, session.progress);
         session.eta = payload.eta || session.eta;
         session.checkpointActionIndex = Math.max(0, payload.actionIndex || 0);
         session.totalActions = Math.max(0, payload.totalActions || session.totalActions || 0);
         session.lastHeartbeatAt = Date.now();
-        session.scheduleNextStartAt = 0;
         session.updatedAt = Date.now();
         session.lastError = null;
         session.lastErrorCode = null;
@@ -552,8 +484,6 @@ async function handleRunnerError(tabId, payload) {
         session.attentionCode = payload.code || inferIssueCode(payload.message);
         session.attentionMessage = getRecoveryHint(payload.code || inferIssueCode(payload.message), payload.message || 'Click inside the editor and resume the active drip.');
         session.lastHeartbeatAt = Date.now();
-        session.pauseMode = null;
-        session.scheduleNextStartAt = 0;
         session.updatedAt = Date.now();
         await writeSessions(sessions);
     });
@@ -601,13 +531,6 @@ async function recoverSessionForTab(tabId, options = {}) {
         return;
     }
 
-    const scheduleStatus = getScheduleStatusForJob(session.activeJob);
-    if (scheduleStatus.enabled && !scheduleStatus.active) {
-        await pauseSessionForSchedule(tabId, session, scheduleStatus);
-        await syncHealthAlarm();
-        return;
-    }
-
     if (!options.manual && !canAutoRecoverSession(session)) {
         await syncHealthAlarm();
         return;
@@ -630,8 +553,6 @@ async function recoverSessionForTab(tabId, options = {}) {
             applyRuntimeSnapshotToSession(nextSession, response.runtime, {
                 preserveCheckpointFloor: true
             });
-            nextSession.pauseMode = null;
-            nextSession.scheduleNextStartAt = 0;
             await writeSessions(sessions);
         });
     } catch (error) {
@@ -656,68 +577,7 @@ async function recoverSessionForTab(tabId, options = {}) {
 }
 
 function canAutoRecoverSession(session) {
-    if (AUTO_RECOVERY_STATES.has(session.state)) {
-        return true;
-    }
-
-    return session.state === SESSION_STATES.PAUSED && session.pauseMode === 'schedule';
-}
-
-async function pauseSessionForSchedule(tabId, session, scheduleStatus) {
-    if (!session.activeJob || !session.activeRunId) {
-        return;
-    }
-
-    if (session.state === SESSION_STATES.PAUSED && session.pauseMode === 'schedule') {
-        await withSessionLock(async () => {
-            const sessions = await readSessions();
-            const nextSession = getSessionForTab(sessions, tabId);
-            if (nextSession.activeRunId !== session.activeRunId) {
-                return;
-            }
-
-            applySchedulePauseState(nextSession, scheduleStatus);
-            await writeSessions(sessions);
-        });
-        return;
-    }
-
-    let runtime = null;
-    if (session.state === SESSION_STATES.RUNNING) {
-        try {
-            const response = await sendRunnerCommand(tabId, { type: 'writerdrip:pause-job', runId: session.activeRunId });
-            runtime = response.runtime || null;
-        } catch (error) {
-            console.warn('[WriterDrip] Could not pause the runner for the schedule window.', error);
-        }
-    }
-
-    await withSessionLock(async () => {
-        const sessions = await readSessions();
-        const nextSession = getSessionForTab(sessions, tabId);
-        if (nextSession.activeRunId !== session.activeRunId) {
-            return;
-        }
-
-        if (runtime) {
-            applyRuntimeSnapshotToSession(nextSession, runtime, {
-                preserveCheckpointFloor: true
-            });
-        }
-        applySchedulePauseState(nextSession, scheduleStatus);
-        await writeSessions(sessions);
-    });
-}
-
-function applySchedulePauseState(session, scheduleStatus) {
-    session.state = SESSION_STATES.PAUSED;
-    session.pauseMode = 'schedule';
-    session.lastError = null;
-    session.lastErrorCode = null;
-    session.attentionMessage = null;
-    session.attentionCode = null;
-    session.scheduleNextStartAt = scheduleStatus?.nextStartAt || 0;
-    session.updatedAt = Date.now();
+    return AUTO_RECOVERY_STATES.has(session.state);
 }
 
 async function handleUiPreflight(tabId, url, expectedDocKey) {
@@ -933,17 +793,15 @@ async function getSessionSnapshot(tabId) {
 function normalizeSession(tabId, rawSession) {
     return {
         tabId,
-        activeJob: rawSession.activeJob || null,
+        activeJob: normalizeStoredJob(rawSession.activeJob),
         activeRunId: rawSession.activeRunId || null,
         state: rawSession.state || SESSION_STATES.IDLE,
-        pauseMode: rawSession.pauseMode || null,
         progress: clampNumber(rawSession.progress, 0, 1, 0),
         eta: rawSession.eta || '00:00',
         checkpointActionIndex: Math.max(0, rawSession.checkpointActionIndex || 0),
         totalActions: Math.max(0, rawSession.totalActions || 0),
         lastHeartbeatAt: Math.max(0, rawSession.lastHeartbeatAt || 0),
         updatedAt: Math.max(0, rawSession.updatedAt || 0),
-        scheduleNextStartAt: Math.max(0, rawSession.scheduleNextStartAt || 0),
         lastError: rawSession.lastError || null,
         lastErrorCode: rawSession.lastErrorCode || null,
         attentionMessage: rawSession.attentionMessage || null,
@@ -954,17 +812,27 @@ function normalizeSession(tabId, rawSession) {
     };
 }
 
+function normalizeStoredJob(rawJob) {
+    if (!rawJob || typeof rawJob !== 'object') {
+        return null;
+    }
+
+    const { schedule: _legacySchedule, ...rest } = rawJob;
+    return {
+        ...rest,
+        correctionIntensity: normalizeCorrectionIntensity(rawJob.correctionIntensity)
+    };
+}
+
 function resetActiveRun(session, nextState) {
     session.activeJob = null;
     session.activeRunId = null;
     session.state = nextState;
-    session.pauseMode = null;
     session.progress = nextState === SESSION_STATES.COMPLETE ? 1 : 0;
     session.eta = '00:00';
     session.checkpointActionIndex = 0;
     session.totalActions = 0;
     session.lastHeartbeatAt = 0;
-    session.scheduleNextStartAt = 0;
     session.updatedAt = Date.now();
     session.lastError = null;
     session.lastErrorCode = null;
@@ -975,12 +843,6 @@ function resetActiveRun(session, nextState) {
 function markSessionAwaitingTabReopen(session) {
     if (!session?.activeJob || !session?.activeRunId) {
         return false;
-    }
-
-    if (session.pauseMode === 'schedule') {
-        const scheduleStatus = getScheduleStatusForJob(session.activeJob);
-        applySchedulePauseState(session, scheduleStatus);
-        return true;
     }
 
     session.state = SESSION_STATES.ATTENTION;
@@ -1005,7 +867,6 @@ function applyRuntimeSnapshotToSession(session, runtime, options = {}) {
     }
 
     session.state = runtimeState || session.state || SESSION_STATES.RUNNING;
-    session.pauseMode = null;
     session.progress = clampNumber(runtime?.percent, 0, 1, session.progress);
     session.eta = runtime?.eta || session.eta;
 
@@ -1015,7 +876,6 @@ function applyRuntimeSnapshotToSession(session, runtime, options = {}) {
         : actionIndex;
     session.totalActions = Math.max(session.totalActions || 0, runtime?.totalActions || 0);
     session.lastHeartbeatAt = Date.now();
-    session.scheduleNextStartAt = 0;
     session.updatedAt = Date.now();
     session.lastError = null;
     session.lastErrorCode = null;
@@ -1045,7 +905,6 @@ async function getUiState(tabId, url = '') {
     });
 
     const session = await getSessionSnapshot(tabId);
-    const scheduleStatus = buildPublicScheduleStatus(session.activeJob?.schedule);
 
     return {
         tabId,
@@ -1055,11 +914,6 @@ async function getUiState(tabId, url = '') {
         activeJob: summarizeJob(session.activeJob),
         isRunning: session.state === SESSION_STATES.RUNNING || session.state === SESSION_STATES.STARTING,
         isPaused: session.state === SESSION_STATES.PAUSED,
-        pauseMode: session.pauseMode,
-        scheduleStatus: scheduleStatus ? {
-            ...scheduleStatus,
-            nextStartAt: session.scheduleNextStartAt || scheduleStatus.nextStartAt || null
-        } : null,
         attentionMessage: session.attentionMessage,
         attentionCode: session.attentionCode,
         lastError: session.lastError,
@@ -1075,7 +929,6 @@ function createJob(rawJob) {
     const durationMins = normalizeDurationMins(rawJob?.durationMins, minimumDurationMins);
     const docKey = typeof rawJob?.docKey === 'string' && rawJob.docKey.trim() ? rawJob.docKey.trim() : null;
     const correctionIntensity = normalizeCorrectionIntensity(rawJob?.correctionIntensity);
-    const schedule = normalizeDailySchedule(rawJob?.schedule);
     if (!text || !docKey || !Number.isFinite(durationMins) || durationMins < minimumDurationMins || durationMins > MAX_DURATION_MINS) {
         return null;
     }
@@ -1087,7 +940,6 @@ function createJob(rawJob) {
         durationMins,
         preset: rawJob?.preset || null,
         correctionIntensity,
-        schedule,
         createdAt: Date.now(),
         seed: Math.floor(Math.random() * 2147483647),
         wordCount: countWords(text),
@@ -1126,30 +978,9 @@ function summarizeJob(job) {
         durationMins: job.durationMins,
         preset: job.preset || null,
         correctionIntensity: normalizeCorrectionIntensity(job.correctionIntensity),
-        schedule: normalizeDailySchedule(job.schedule),
         wordCount: job.wordCount || countWords(job.text || ''),
         charCount: job.charCount || (job.text ? job.text.length : 0),
         preview: job.preview || buildPreview(job.text || '')
-    };
-}
-
-function getScheduleStatusForJob(job, nowValue = Date.now()) {
-    return getDailyScheduleStatus(job?.schedule, nowValue);
-}
-
-function buildPublicScheduleStatus(schedule, nowValue = Date.now()) {
-    const status = getDailyScheduleStatus(schedule, nowValue);
-    if (!status.enabled) {
-        return null;
-    }
-
-    return {
-        enabled: true,
-        active: status.active,
-        startMinute: status.startMinute,
-        endMinute: status.endMinute,
-        nextStartAt: status.nextStartAt,
-        nextEndAt: status.nextEndAt
     };
 }
 
@@ -1305,14 +1136,7 @@ function formatDurationMins(minutesValue) {
 async function syncHealthAlarm() {
     const sessions = await readSessions();
     const hasActiveRun = Object.values(sessions).some((session) => {
-        return Boolean(
-            session.activeJob &&
-            session.activeRunId &&
-            (
-                AUTO_RECOVERY_STATES.has(session.state) ||
-                (session.pauseMode === 'schedule' && AUTO_SCHEDULE_RECOVERY_STATES.has(session.state))
-            )
-        );
+        return Boolean(session.activeJob && session.activeRunId && AUTO_RECOVERY_STATES.has(session.state));
     });
 
     const existingAlarm = await chrome.alarms.get(HEALTH_ALARM);
