@@ -634,7 +634,8 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             percent: runtime.percent,
             eta: runtime.eta,
             actionIndex: runtime.actionIndex,
-            totalActions: runtime.totalActions
+            totalActions: runtime.totalActions,
+            verification: runtime.completionVerification || null
         };
     }
 

@@ -417,10 +417,23 @@ async function handleRunnerProgress(tabId, payload) {
         return buildErrorResponse(ISSUE_CODES.RUNTIME_ERROR, 'Invalid progress payload.');
     }
 
+    const reachedCompletion = payload.state === SESSION_STATES.COMPLETE;
+
     await withSessionLock(async () => {
         const sessions = await readSessions();
         const session = getSessionForTab(sessions, tabId);
         if (session.activeRunId !== payload.runId) {
+            return;
+        }
+
+        if (reachedCompletion) {
+            session.lastCompletedJob = summarizeJob(session.activeJob);
+            session.lastCompletedVerification = normalizeCompletionVerification(payload.verification);
+            resetActiveRun(session, SESSION_STATES.COMPLETE);
+            session.progress = 1;
+            session.eta = '00:00';
+            session.updatedAt = Date.now();
+            await writeSessions(sessions);
             return;
         }
 
@@ -437,6 +450,10 @@ async function handleRunnerProgress(tabId, payload) {
         session.attentionCode = null;
         await writeSessions(sessions);
     });
+
+    if (reachedCompletion) {
+        await syncHealthAlarm();
+    }
 
     return { ok: true };
 }
@@ -1391,5 +1408,8 @@ globalThis.__writerdripBackgroundTestHooks = Object.freeze({
     createJob,
     markSessionAwaitingTabReopen,
     normalizeSession,
-    applyRuntimeSnapshotToSession
+    applyRuntimeSnapshotToSession,
+    handleRunnerProgress,
+    readSessions,
+    writeSessions
 });

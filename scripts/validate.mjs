@@ -238,6 +238,40 @@ async function validateBackgroundRuntime() {
         'Paused sessions should stay recoverable when the original tab closes.'
     );
     assert.equal(pausedSession.attentionCode, 'tab-suspended', 'Paused reopened sessions should guide the user back through the suspended-tab recovery flow.');
+
+    const completionFromProgressSession = hooks.normalizeSession(4, {
+        activeJob: hooks.createJob({
+            text: 'A draft that finishes through the progress path.',
+            docKey: 'complete-through-progress',
+            durationMins: 5,
+            correctionIntensity: 'medium'
+        }),
+        activeRunId: 'run_progress_complete',
+        state: hooks.SESSION_STATES.RUNNING,
+        progress: 0.94,
+        checkpointActionIndex: 16,
+        totalActions: 17
+    });
+    await hooks.writeSessions({ 4: completionFromProgressSession });
+    await hooks.handleRunnerProgress(4, {
+        runId: 'run_progress_complete',
+        state: hooks.SESSION_STATES.COMPLETE,
+        percent: 1,
+        eta: '00:00',
+        actionIndex: 17,
+        totalActions: 17,
+        verification: {
+            verified: true,
+            summary: 'Final verification arrived with the progress update.',
+            checks: []
+        }
+    });
+    const storedSessions = await hooks.readSessions();
+    const completedFromProgress = storedSessions['4'];
+    assert.equal(completedFromProgress.activeJob, null, 'Completed progress updates should clear the active job even if the final completion message is missed.');
+    assert.equal(completedFromProgress.activeRunId, null, 'Completed progress updates should clear the active run id even if the final completion message is missed.');
+    assert.equal(completedFromProgress.state, hooks.SESSION_STATES.COMPLETE, 'Completed progress updates should move the session into the complete state.');
+    assert.equal(completedFromProgress.lastCompletedVerification?.verified, true, 'Completed progress updates should preserve completion verification details.');
 }
 
 async function validatePopupRuntime() {
