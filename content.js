@@ -573,10 +573,12 @@ if (!globalThis.__writerdripRunnerLoaded) {
         };
 
         runner.state = RUNNER_STATES.COMPLETE;
+        runner.paused = false;
+        runner.pauseStartedAtMs = 0;
+        runner.stopRequested = false;
         runner.completedIndex = runner.actions.length;
         runner.elapsedSeconds = runner.totalSeconds;
         await reportProgress(true);
-        resetRunner();
         await notifyBackground('runner:completed', payload);
     }
 
@@ -2113,17 +2115,9 @@ if (!globalThis.__writerdripRunnerLoaded) {
                 realignPause: (0.08 + rng() * 0.14 + Math.min(context.wordLength * 0.01, 0.08)) * draftProfile.realignPauseFactor
             }
         };
-        const variation = pickMistakeVariation(rng, plannerState);
-        const canTranspose = isWordCharacter(nextChar);
-        const canCaseSwap = char !== char.toLowerCase() || char !== char.toUpperCase();
-        const transThreshold = draftProfile.transpositionChance;
-        const doubleThreshold = transThreshold + draftProfile.doubleTapChance;
-        const caseThreshold = doubleThreshold + draftProfile.casingErrorChance;
-        const omissionThreshold = caseThreshold + draftProfile.omissionChance;
-        const vowelThreshold = omissionThreshold + draftProfile.vowelSlipChance;
-        const softThreshold = vowelThreshold + draftProfile.softSlipChance;
+        const mistakeType = selectMistakeType(rng, draftProfile, char, nextChar, plannerState);
 
-        if (variation < transThreshold && canTranspose) {
+        if (mistakeType === 'trans') {
             plan.outputs.push({
                 char: nextChar,
                 delay: baseDelay,
@@ -2137,7 +2131,7 @@ if (!globalThis.__writerdripRunnerLoaded) {
             plan.initialMistakenChars = 2;
             plan.indexAdvance = 1;
             plan.pendingFix.type = 'trans';
-        } else if (variation < doubleThreshold) {
+        } else if (mistakeType === 'double') {
             plan.outputs.push({
                 char,
                 delay: baseDelay,
@@ -2150,7 +2144,7 @@ if (!globalThis.__writerdripRunnerLoaded) {
             });
             plan.initialMistakenChars = 2;
             plan.pendingFix.type = 'double';
-        } else if (variation < caseThreshold && canCaseSwap) {
+        } else if (mistakeType === 'case') {
             const wrongCase = char === char.toUpperCase() ? char.toLowerCase() : char.toUpperCase();
             plan.outputs.push({
                 char: wrongCase,
@@ -2159,11 +2153,11 @@ if (!globalThis.__writerdripRunnerLoaded) {
             });
             plan.initialMistakenChars = 1;
             plan.pendingFix.type = 'case';
-        } else if (variation < omissionThreshold) {
+        } else if (mistakeType === 'omit') {
             plan.pendingFix.type = 'omit';
             plan.pendingFix.noticePause += 0.08;
             plan.pendingFix.realignPause += 0.04;
-        } else if (variation < vowelThreshold) {
+        } else if (mistakeType === 'vowel') {
             plan.outputs.push({
                 char: getVowelSlip(char, rng),
                 delay: baseDelay,
@@ -2172,7 +2166,7 @@ if (!globalThis.__writerdripRunnerLoaded) {
             plan.initialMistakenChars = 1;
             plan.pendingFix.type = 'vowel';
             plan.pendingFix.noticePause += 0.03;
-        } else if (variation < softThreshold) {
+        } else if (mistakeType === 'soft') {
             plan.outputs.push({
                 char: getSoftSlip(char, rng),
                 delay: baseDelay,
@@ -2193,6 +2187,49 @@ if (!globalThis.__writerdripRunnerLoaded) {
 
         plan.pendingFix.initialMistakenChars = plan.initialMistakenChars;
         return plan;
+    }
+
+    function selectMistakeType(rng, draftProfile, currentChar, nextChar, plannerState) {
+        const canTranspose = isWordCharacter(nextChar);
+        const canCaseSwap = currentChar !== currentChar.toLowerCase() || currentChar !== currentChar.toUpperCase();
+        const loweredChar = String(currentChar || '').toLowerCase();
+        const weights = [];
+
+        if (canTranspose && draftProfile.transpositionChance > 0) {
+            weights.push({ type: 'trans', weight: draftProfile.transpositionChance });
+        }
+        if (draftProfile.doubleTapChance > 0) {
+            weights.push({ type: 'double', weight: draftProfile.doubleTapChance });
+        }
+        if (canCaseSwap && draftProfile.casingErrorChance > 0) {
+            weights.push({ type: 'case', weight: draftProfile.casingErrorChance });
+        }
+        if (draftProfile.omissionChance > 0) {
+            weights.push({ type: 'omit', weight: draftProfile.omissionChance });
+        }
+        if (VOWEL_SLIP_MAP[loweredChar] && draftProfile.vowelSlipChance > 0) {
+            weights.push({ type: 'vowel', weight: draftProfile.vowelSlipChance });
+        }
+        if (SOFT_SLIP_MAP[loweredChar] && draftProfile.softSlipChance > 0) {
+            weights.push({ type: 'soft', weight: draftProfile.softSlipChance });
+        }
+        if (draftProfile.keyboardSlipChance > 0) {
+            weights.push({ type: 'key', weight: draftProfile.keyboardSlipChance });
+        }
+
+        if (!weights.length) {
+            return 'key';
+        }
+
+        let weightedPick = pickMistakeVariation(rng, plannerState) * weights.reduce((total, entry) => total + entry.weight, 0);
+        for (const entry of weights) {
+            weightedPick -= entry.weight;
+            if (weightedPick <= 0) {
+                return entry.type;
+            }
+        }
+
+        return weights[weights.length - 1].type;
     }
 
     function planWordVariantMistake(index, rng, baseDelay, context, draftProfile) {
@@ -2811,6 +2848,7 @@ if (!globalThis.__writerdripRunnerLoaded) {
     globalThis.__writerdripTestHooks = Object.freeze({
         buildActionPlan,
         buildDraftMistakeProfile,
+        selectMistakeType,
         validateActionPlan,
         replayActionPlan,
         countRepairSequences,

@@ -113,6 +113,36 @@ async function validateBackgroundRuntime() {
     await evaluateScript(backgroundSandbox, 'shared.js');
     await evaluateScript(backgroundSandbox, 'background.js');
     await flushMicrotasks();
+
+    const hooks = backgroundSandbox.__writerdripBackgroundTestHooks;
+    assert.ok(hooks, 'background.js should expose background test hooks.');
+
+    const session = hooks.normalizeSession(1, {
+        activeJob: hooks.createJob({
+            text: 'A draft that should finish cleanly.',
+            docKey: 'test-doc',
+            durationMins: 5,
+            correctionIntensity: 'medium'
+        }),
+        activeRunId: 'run_test',
+        state: hooks.SESSION_STATES.RUNNING,
+        progress: 0.72,
+        checkpointActionIndex: 42,
+        totalActions: 60
+    });
+
+    hooks.applyRuntimeSnapshotToSession(session, {
+        state: hooks.SESSION_STATES.COMPLETE,
+        percent: 1,
+        eta: '00:00',
+        actionIndex: 60,
+        totalActions: 60
+    });
+
+    assert.equal(session.state, hooks.SESSION_STATES.COMPLETE, 'Completed runtime snapshots should move the session to complete.');
+    assert.equal(session.activeJob, null, 'Completed runtime snapshots should clear the active job.');
+    assert.equal(session.activeRunId, null, 'Completed runtime snapshots should clear the active run id.');
+    assert.ok(session.lastCompletedJob, 'Completed runtime snapshots should preserve a summary of the completed job.');
 }
 
 async function validatePopupRuntime() {
@@ -229,6 +259,18 @@ async function validatePlanner() {
     assert.ok(mediumProfile.repairDepthFactor > lowProfile.repairDepthFactor, 'Medium intensity should allow deeper repairs than low.');
     assert.ok(lowProfile.cadenceProfile && mediumProfile.cadenceProfile && highProfile.cadenceProfile, 'Draft profiles should carry a cadence profile.');
     assert.ok(highProfile.cadenceProfile.connectivePauseChance >= mediumProfile.cadenceProfile.connectivePauseChance, 'Richer drafts should preserve smarter cadence settings.');
+
+    const sampledMistakeTypes = new Map();
+    for (let seed = 1; seed <= 400; seed += 1) {
+        const type = hooks.selectMistakeType(() => {
+            let value = seed * 9301 + 49297;
+            value %= 233280;
+            return value / 233280;
+        }, highProfile, 'e', 'r', { recentTypes: [], segmentCounts: [], sentenceCounts: new Map(), sentenceIds: [], lastMistakeIndex: -Infinity, wordVariantCount: 0 });
+        sampledMistakeTypes.set(type, (sampledMistakeTypes.get(type) || 0) + 1);
+    }
+
+    assert.ok(sampledMistakeTypes.get('key') > 0, 'High-intensity selection should still leave room for keyboard-neighbor slips.');
 
     const intensityAverages = {
         low: { repairs: 0, variants: 0, backspaces: 0 },

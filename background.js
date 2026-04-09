@@ -229,15 +229,7 @@ async function handleRunStart(tabId, url, rawJob) {
                 return;
             }
 
-            session.state = response.runtime?.state || SESSION_STATES.RUNNING;
-            session.progress = clampNumber(response.runtime?.percent, 0, 1, 0);
-            session.eta = response.runtime?.eta || session.eta;
-            session.checkpointActionIndex = Math.max(0, response.runtime?.actionIndex || 0);
-            session.totalActions = Math.max(0, response.runtime?.totalActions || 0);
-            session.lastHeartbeatAt = Date.now();
-            session.updatedAt = Date.now();
-            session.lastErrorCode = null;
-            session.attentionCode = null;
+            applyRuntimeSnapshotToSession(session, response.runtime);
             await writeSessions(sessions);
         });
     } catch (error) {
@@ -523,17 +515,9 @@ async function recoverSessionForTab(tabId, options = {}) {
                 return;
             }
 
-            nextSession.state = response.runtime?.state || nextSession.state || SESSION_STATES.RUNNING;
-            nextSession.progress = clampNumber(response.runtime?.percent, 0, 1, nextSession.progress);
-            nextSession.eta = response.runtime?.eta || nextSession.eta;
-            nextSession.checkpointActionIndex = Math.max(nextSession.checkpointActionIndex || 0, response.runtime?.actionIndex || 0);
-            nextSession.totalActions = Math.max(nextSession.totalActions || 0, response.runtime?.totalActions || 0);
-            nextSession.lastHeartbeatAt = Date.now();
-            nextSession.updatedAt = Date.now();
-            nextSession.lastError = null;
-            nextSession.lastErrorCode = null;
-            nextSession.attentionMessage = null;
-            nextSession.attentionCode = null;
+            applyRuntimeSnapshotToSession(nextSession, response.runtime, {
+                preserveCheckpointFloor: true
+            });
             await writeSessions(sessions);
         });
     } catch (error) {
@@ -725,6 +709,34 @@ function resetActiveRun(session, nextState) {
     session.checkpointActionIndex = 0;
     session.totalActions = 0;
     session.lastHeartbeatAt = 0;
+    session.updatedAt = Date.now();
+    session.lastError = null;
+    session.lastErrorCode = null;
+    session.attentionMessage = null;
+    session.attentionCode = null;
+}
+
+function applyRuntimeSnapshotToSession(session, runtime, options = {}) {
+    const runtimeState = runtime?.state;
+    if (runtimeState === SESSION_STATES.COMPLETE) {
+        session.lastCompletedJob = summarizeJob(session.activeJob);
+        resetActiveRun(session, SESSION_STATES.COMPLETE);
+        session.progress = 1;
+        session.eta = '00:00';
+        session.updatedAt = Date.now();
+        return;
+    }
+
+    session.state = runtimeState || session.state || SESSION_STATES.RUNNING;
+    session.progress = clampNumber(runtime?.percent, 0, 1, session.progress);
+    session.eta = runtime?.eta || session.eta;
+
+    const actionIndex = Math.max(0, runtime?.actionIndex || 0);
+    session.checkpointActionIndex = options.preserveCheckpointFloor
+        ? Math.max(session.checkpointActionIndex || 0, actionIndex)
+        : actionIndex;
+    session.totalActions = Math.max(session.totalActions || 0, runtime?.totalActions || 0);
+    session.lastHeartbeatAt = Date.now();
     session.updatedAt = Date.now();
     session.lastError = null;
     session.lastErrorCode = null;
@@ -1119,3 +1131,10 @@ function inferIssueCode(message = '') {
 
     return ISSUE_CODES.RUNTIME_ERROR;
 }
+
+globalThis.__writerdripBackgroundTestHooks = Object.freeze({
+    SESSION_STATES,
+    createJob,
+    normalizeSession,
+    applyRuntimeSnapshotToSession
+});
