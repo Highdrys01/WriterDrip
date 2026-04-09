@@ -59,8 +59,42 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         doubleTapChance: 0.1,
         casingErrorChance: 0.08,
         omissionChance: 0.14,
+        spacingOmissionChance: 0.07,
+        doubleSpaceChance: 0.05,
+        punctuationOmissionChance: 0.06,
+        punctuationSpacingChance: 0.04,
+        repeatWordChance: 0.035,
+        smallWordSkipChance: 0.03,
         cooldownChars: 100
     };
+    const PUNCTUATION_RECOVERY_CHARS = new Set([',', ';', ':']);
+    const COMMON_SMALL_WORDS = new Set([
+        'a',
+        'an',
+        'am',
+        'and',
+        'are',
+        'as',
+        'at',
+        'be',
+        'by',
+        'do',
+        'for',
+        'if',
+        'in',
+        'is',
+        'it',
+        'me',
+        'my',
+        'of',
+        'on',
+        'or',
+        'so',
+        'to',
+        'up',
+        'us',
+        'we'
+    ]);
     const CONNECTIVE_PAUSE_WORDS = new Set([
         'although',
         'because',
@@ -234,6 +268,12 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             doubleTapScale: 0.74,
             casingScale: 0.72,
             omissionScale: 0.64,
+            spacingOmissionScale: 0.2,
+            doubleSpaceScale: 0.16,
+            punctuationOmissionScale: 0.18,
+            punctuationSpacingScale: 0.14,
+            repeatWordScale: 0,
+            smallWordSkipScale: 0,
             spacingScale: 1.24,
             segmentBias: -1,
             sentenceAllowanceBonus: 0,
@@ -263,6 +303,12 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             doubleTapScale: 1,
             casingScale: 1,
             omissionScale: 1,
+            spacingOmissionScale: 0.72,
+            doubleSpaceScale: 0.62,
+            punctuationOmissionScale: 0.76,
+            punctuationSpacingScale: 0.58,
+            repeatWordScale: 0.42,
+            smallWordSkipScale: 0.34,
             spacingScale: 1,
             segmentBias: 0,
             sentenceAllowanceBonus: 0,
@@ -292,6 +338,12 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             doubleTapScale: 1.18,
             casingScale: 1.18,
             omissionScale: 1.28,
+            spacingOmissionScale: 1.18,
+            doubleSpaceScale: 1.16,
+            punctuationOmissionScale: 1.22,
+            punctuationSpacingScale: 1.08,
+            repeatWordScale: 1.08,
+            smallWordSkipScale: 0.92,
             spacingScale: 0.76,
             segmentBias: 1,
             sentenceAllowanceBonus: 1,
@@ -1429,9 +1481,11 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
 
         const addRepair = (currentIndex, isEndOfText = false) => {
             const noticePause = pendingFix?.noticePause ?? (0.45 + rng() * 0.35);
+            const activeMistakeType = pendingFix?.type || '';
             actions.push({
                 char: null,
                 kind: 'repair-pause',
+                mistakeType: activeMistakeType,
                 delay: noticePause,
                 distributionWeight: 1.5
             });
@@ -1475,7 +1529,8 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             const distributionWeight = getDistributionWeight(char, progress, sentenceLength, draftProfile.cadenceProfile);
             const canFixAtBoundary = char === '\n' || ['.', '!', '?', ' '].includes(char);
             const wordVariantContext = getWordVariantContext(chars, index, draftProfile, plannerState);
-            const mistakeContext = wordVariantContext || getMistypeContext(chars, index);
+            const specialMistakeContext = wordVariantContext ? null : getSpecialMistakeContext(chars, index, draftProfile);
+            const mistakeContext = wordVariantContext || specialMistakeContext || getMistypeContext(chars, index);
             const eligibleMistypeTarget = Boolean(mistakeContext) && mistakeCount < draftProfile.maxMistakes;
             const canScheduleHere = eligibleMistypeTarget
                 ? canScheduleMistake(chars, index, mistakeContext, draftProfile, plannerState)
@@ -1504,7 +1559,9 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             if (shouldUseWordVariant || shouldMistype) {
                 const mistakePlan = shouldUseWordVariant
                     ? planWordVariantMistake(index, rng, baseDelay, wordVariantContext, draftProfile)
-                    : planMistake(chars, index, rng, baseDelay, mistakeContext, draftProfile, plannerState);
+                    : specialMistakeContext
+                        ? planSpecialMistake(chars, index, rng, baseDelay, specialMistakeContext, draftProfile, plannerState)
+                        : planMistake(chars, index, rng, baseDelay, mistakeContext, draftProfile, plannerState);
                 for (const output of mistakePlan.outputs) {
                     actions.push(output);
                 }
@@ -1569,6 +1626,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         const paceFactor = clamp(0.88 + (Math.min(secondsPerChar, 6) * 0.06), 0.88, 1.24);
         const technicalGuard = clamp(1 - Math.min((symbolRatio * 3.4) + (uppercaseRatio * 0.75), 0.4), 0.62, 1);
         const proseFactor = clamp(0.93 + Math.min((punctuationRatio * 2.8) + (newlineRatio * 5), 0.2) + (averageWordLength > 4.8 ? 0.05 : 0), 0.93, 1.18);
+        const speedStress = clamp((1.45 - secondsPerChar) * 0.45, 0, 0.34);
         const requestedIntensity = normalizeCorrectionIntensity(correctionIntensity);
         const suggestedIntensity = analysis.suggestedCorrectionIntensity;
         const resolvedIntensity = requestedIntensity === 'suggested' ? suggestedIntensity : requestedIntensity;
@@ -1679,6 +1737,12 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             doubleTapChance: clamp((PROFILE.doubleTapChance + (paceFactor < 0.95 ? 0.03 : 0)) * intensityProfile.doubleTapScale, 0.06, 0.18),
             casingErrorChance: clamp((PROFILE.casingErrorChance * technicalGuard * (1 - Math.min(uppercaseRatio * 0.7, 0.5))) * intensityProfile.casingScale, 0.02, 0.1),
             omissionChance: clamp((PROFILE.omissionChance * proseFactor * clamp(averageWordLength / 5.1, 0.82, 1.12)) * intensityProfile.omissionScale, 0.07, 0.24),
+            spacingOmissionChance: clamp((PROFILE.spacingOmissionChance + (speedStress * 0.14)) * proseFactor * (intensityProfile.spacingOmissionScale || 1), 0.01, 0.18),
+            doubleSpaceChance: clamp((PROFILE.doubleSpaceChance + (speedStress * 0.1)) * proseFactor * (intensityProfile.doubleSpaceScale || 1), 0.01, 0.14),
+            punctuationOmissionChance: clamp((PROFILE.punctuationOmissionChance + (speedStress * 0.08)) * proseFactor * (intensityProfile.punctuationOmissionScale || 1), 0.01, 0.16),
+            punctuationSpacingChance: clamp((PROFILE.punctuationSpacingChance + (speedStress * 0.06)) * proseFactor * (intensityProfile.punctuationSpacingScale || 1), 0.005, 0.12),
+            repeatWordChance: clamp((PROFILE.repeatWordChance + (speedStress * 0.08)) * proseFactor * (intensityProfile.repeatWordScale || 0), 0, 0.14),
+            smallWordSkipChance: clamp((PROFILE.smallWordSkipChance + (speedStress * 0.06)) * proseFactor * (intensityProfile.smallWordSkipScale || 0), 0, 0.12),
             keyboardSlipChance: clamp((0.22 + (averageWordLength > 4.5 ? 0.03 : 0)) * (intensityProfile.keyboardSlipScale || 1), 0.08, 0.38),
             vowelSlipChance: clamp((0.1 + (averageWordLength > 4.8 ? 0.03 : 0) + (proseFactor > 1.02 ? 0.02 : 0)) * (intensityProfile.vowelSlipScale || 1), 0.03, 0.24),
             softSlipChance: clamp((0.06 + (wordCount >= 40 ? 0.02 : 0)) * technicalGuard * (intensityProfile.softSlipScale || 1), 0.01, 0.18),
@@ -2009,8 +2073,14 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         const wordLength = end - start;
         const offsetInWord = index - start;
         const remainingInWord = end - index - 1;
+        const word = chars.slice(start, end).join('');
+        const previousVisible = getPreviousVisibleChar(chars, start);
+        const isSentenceStart = !previousVisible || ['.', '!', '?', '\n'].includes(previousVisible.char);
+        const isStandaloneI = word === 'I';
+        const canCaseMistake = /[A-Za-z]/.test(char);
+        const canLetterMistake = wordLength >= 4 && offsetInWord > 0 && remainingInWord > 0;
 
-        if (wordLength < 4 || offsetInWord === 0 || remainingInWord === 0) {
+        if (!canCaseMistake && !canLetterMistake) {
             return null;
         }
 
@@ -2018,10 +2088,28 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             char,
             start,
             end,
+            word,
             wordLength,
             offsetInWord,
-            remainingInWord
+            remainingInWord,
+            isSentenceStart,
+            isStandaloneI,
+            canCaseMistake,
+            canLetterMistake
         };
+    }
+
+    function getPreviousVisibleChar(chars, index) {
+        for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+            const char = chars[cursor];
+            if (char !== ' ' && char !== '\t') {
+                return {
+                    char,
+                    index: cursor
+                };
+            }
+        }
+        return null;
     }
 
     function getWordVariantContext(chars, index, draftProfile, plannerState) {
@@ -2067,6 +2155,151 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         };
     }
 
+    function getSpecialMistakeContext(chars, index, draftProfile) {
+        return getPunctuationMistakeContext(chars, index, draftProfile) ||
+            getSpaceMistakeContext(chars, index, draftProfile) ||
+            getSmallWordSkipContext(chars, index, draftProfile);
+    }
+
+    function getPunctuationMistakeContext(chars, index, draftProfile) {
+        const char = chars[index] || '';
+        if (!PUNCTUATION_RECOVERY_CHARS.has(char)) {
+            return null;
+        }
+
+        const previousChar = chars[index - 1] || '';
+        const nextChar = chars[index + 1] || '';
+        if (!isWordCharacter(previousChar) || !(nextChar === ' ' || nextChar === '\n' || nextChar === '')) {
+            return null;
+        }
+
+        if (!draftProfile.punctuationOmissionChance && !draftProfile.punctuationSpacingChance) {
+            return null;
+        }
+
+        return {
+            kind: 'punctuation',
+            char,
+            start: index,
+            end: index + 1,
+            wordLength: 1,
+            offsetInWord: 0,
+            remainingInWord: 0
+        };
+    }
+
+    function getSpaceMistakeContext(chars, index, draftProfile) {
+        const char = chars[index] || '';
+        if (char !== ' ') {
+            return null;
+        }
+
+        const previousChar = chars[index - 1] || '';
+        const nextChar = chars[index + 1] || '';
+        if (!isWordCharacter(previousChar) || !isWordCharacter(nextChar)) {
+            return null;
+        }
+
+        const previousWord = getWordBeforeIndex(chars, index);
+        const nextWord = getWordAfterIndex(chars, index + 1);
+        if (!previousWord || !nextWord) {
+            return null;
+        }
+
+        if (!draftProfile.spacingOmissionChance && !draftProfile.doubleSpaceChance && !draftProfile.repeatWordChance) {
+            return null;
+        }
+
+        return {
+            kind: 'space-gap',
+            char,
+            start: index,
+            end: index + 1,
+            previousWord,
+            nextWord,
+            wordLength: Math.max(previousWord.word.length, nextWord.word.length),
+            offsetInWord: 0,
+            remainingInWord: Math.max(0, nextWord.word.length - 1)
+        };
+    }
+
+    function getSmallWordSkipContext(chars, index, draftProfile) {
+        if (!draftProfile.smallWordSkipChance) {
+            return null;
+        }
+
+        const char = chars[index] || '';
+        if (!isWordCharacter(char) || isWordCharacter(chars[index - 1] || '')) {
+            return null;
+        }
+
+        const previousVisible = getPreviousVisibleChar(chars, index);
+        if (!previousVisible || ['.', '!', '?', '\n'].includes(previousVisible.char)) {
+            return null;
+        }
+
+        const word = getWordAfterIndex(chars, index);
+        if (!word) {
+            return null;
+        }
+
+        if (!COMMON_SMALL_WORDS.has(word.word.toLowerCase()) || word.word.length > 3 || word.word !== word.word.toLowerCase()) {
+            return null;
+        }
+
+        const trailingChar = chars[word.end] || '';
+        if (trailingChar !== ' ') {
+            return null;
+        }
+
+        const nextWord = getWordAfterIndex(chars, word.end + 1);
+        if (!nextWord) {
+            return null;
+        }
+
+        return {
+            kind: 'small-word-skip',
+            char,
+            start: index,
+            end: word.end + 1,
+            word,
+            nextWord,
+            wordLength: word.word.length,
+            offsetInWord: 0,
+            remainingInWord: Math.max(0, nextWord.word.length - 1)
+        };
+    }
+
+    function getWordBeforeIndex(chars, index) {
+        let end = index;
+        while (end > 0 && !isWordCharacter(chars[end - 1] || '')) {
+            end -= 1;
+        }
+
+        let start = end;
+        while (start > 0 && isWordCharacter(chars[start - 1] || '')) {
+            start -= 1;
+        }
+
+        const word = chars.slice(start, end).join('');
+        return word ? { word, start, end } : null;
+    }
+
+    function getWordAfterIndex(chars, index) {
+        let start = index;
+        while (start < chars.length && !isWordCharacter(chars[start] || '')) {
+            start += 1;
+        }
+
+        let end = start;
+        while (end < chars.length && isWordCharacter(chars[end] || '')) {
+            end += 1;
+        }
+
+        const word = chars.slice(start, end).join('');
+        return word ? { word, start, end } : null;
+    }
+
     function isWordCharacter(char) {
         return /[a-z]/i.test(char || '');
     }
@@ -2074,6 +2307,38 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
     function getMistakeChance(context, progress, sentenceLength, fatigueMultiplier, draftProfile, mistakeCount) {
         if (!context || !draftProfile.maxMistakes) {
             return 0;
+        }
+
+        if (context.kind === 'space-gap') {
+            let chance = (draftProfile.spacingOmissionChance + draftProfile.doubleSpaceChance + draftProfile.repeatWordChance) * 0.92;
+            chance *= fatigueMultiplier;
+            chance *= 0.9 + Math.min(sentenceLength * 0.01, 0.22);
+            if (progress > 0.16 && progress < 0.88) {
+                chance *= 1.06;
+            }
+            const usageRatio = mistakeCount / Math.max(1, draftProfile.maxMistakes);
+            chance *= clamp(1 - (usageRatio * 0.55), 0.35, 1);
+            return chance;
+        }
+
+        if (context.kind === 'punctuation') {
+            let chance = (draftProfile.punctuationOmissionChance + draftProfile.punctuationSpacingChance) * 0.95;
+            chance *= fatigueMultiplier;
+            chance *= 0.94 + Math.min(sentenceLength * 0.012, 0.24);
+            const usageRatio = mistakeCount / Math.max(1, draftProfile.maxMistakes);
+            chance *= clamp(1 - (usageRatio * 0.5), 0.42, 1);
+            return chance;
+        }
+
+        if (context.kind === 'small-word-skip') {
+            let chance = draftProfile.smallWordSkipChance;
+            chance *= fatigueMultiplier;
+            if (progress > 0.12 && progress < 0.84) {
+                chance *= 1.08;
+            }
+            const usageRatio = mistakeCount / Math.max(1, draftProfile.maxMistakes);
+            chance *= clamp(1 - (usageRatio * 0.45), 0.5, 1);
+            return chance;
         }
 
         let chance = draftProfile.baseMistakeChance * fatigueMultiplier;
@@ -2125,7 +2390,11 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             return false;
         }
 
-        if (hasSensitiveMistypeNeighbor(chars, context)) {
+        if (context.kind !== 'punctuation' && context.kind !== 'space-gap' && context.kind !== 'small-word-skip' && hasSensitiveMistypeNeighbor(chars, context)) {
+            return false;
+        }
+
+        if (context.kind === 'small-word-skip' && (!context.nextWord || context.word?.word.length > 3)) {
             return false;
         }
 
@@ -2223,7 +2492,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
                 realignPause: (0.08 + rng() * 0.14 + Math.min(context.wordLength * 0.01, 0.08)) * draftProfile.realignPauseFactor
             }
         };
-        const mistakeType = selectMistakeType(rng, draftProfile, char, nextChar, plannerState);
+        const mistakeType = selectMistakeType(rng, draftProfile, context, char, nextChar, plannerState);
 
         if (mistakeType === 'trans') {
             plan.outputs.push({
@@ -2297,39 +2566,249 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         return plan;
     }
 
-    function selectMistakeType(rng, draftProfile, currentChar, nextChar, plannerState) {
+    function planSpecialMistake(chars, index, rng, baseDelay, context, draftProfile, plannerState) {
+        if (context.kind === 'space-gap') {
+            return planSpaceMistake(index, rng, baseDelay, context, draftProfile, plannerState);
+        }
+
+        if (context.kind === 'punctuation') {
+            return planPunctuationMistake(index, rng, baseDelay, context, draftProfile);
+        }
+
+        return planSmallWordSkipMistake(index, rng, context, draftProfile);
+    }
+
+    function planSpaceMistake(index, rng, baseDelay, context, draftProfile, plannerState) {
+        const previousWord = context.previousWord?.word || '';
+        const weights = [];
+
+        if (draftProfile.spacingOmissionChance > 0) {
+            weights.push({ type: 'space-omit', weight: draftProfile.spacingOmissionChance });
+        }
+        if (draftProfile.doubleSpaceChance > 0) {
+            weights.push({ type: 'double-space', weight: draftProfile.doubleSpaceChance });
+        }
+        if (previousWord && draftProfile.repeatWordChance > 0) {
+            weights.push({ type: 'repeat-word', weight: draftProfile.repeatWordChance * clamp(previousWord.length / 4.2, 0.82, 1.22) });
+        }
+
+        const selectedType = pickWeightedType(rng, weights, plannerState, 'space-omit');
+        if (selectedType === 'double-space') {
+            return {
+                outputs: [
+                    {
+                        char: ' ',
+                        delay: baseDelay,
+                        distributionWeight: 0.74
+                    },
+                    {
+                        char: ' ',
+                        kind: 'double-space-output',
+                        delay: baseDelay * 0.5,
+                        distributionWeight: 0.28
+                    }
+                ],
+                initialMistakenChars: 1,
+                indexAdvance: 0,
+                cooldownChars: Math.max(44, draftProfile.cooldownChars - 8 + Math.floor(rng() * 12)),
+                pendingFix: {
+                    position: index + 1,
+                    type: 'double-space',
+                    initialMistakenChars: 1,
+                    repairAfterExtraChars: 1 + Math.floor(rng() * 3),
+                    hardExtraChars: 3 + Math.floor(rng() * 3),
+                    preferWordBoundary: true,
+                    noticePause: (0.24 + rng() * 0.22) * draftProfile.noticePauseFactor,
+                    realignPause: (0.06 + rng() * 0.08) * draftProfile.realignPauseFactor
+                }
+            };
+        }
+
+        if (selectedType === 'repeat-word' && previousWord) {
+            const repeatedChars = Array.from(previousWord);
+            const outputs = [
+                {
+                    char: ' ',
+                    delay: baseDelay,
+                    distributionWeight: 0.76
+                }
+            ];
+            for (let cursor = 0; cursor < repeatedChars.length; cursor += 1) {
+                outputs.push({
+                    char: repeatedChars[cursor],
+                    kind: 'repeat-word-output',
+                    delay: cursor === 0 ? baseDelay * 0.68 : baseDelay * (0.48 + (rng() * 0.18)),
+                    distributionWeight: 0.4
+                });
+            }
+            outputs.push({
+                char: ' ',
+                kind: 'repeat-word-output',
+                delay: baseDelay * 0.44,
+                distributionWeight: 0.32
+            });
+
+            const extraChars = repeatedChars.length + 1;
+            return {
+                outputs,
+                initialMistakenChars: extraChars,
+                indexAdvance: 0,
+                cooldownChars: Math.max(54, draftProfile.cooldownChars + Math.floor(rng() * 14)),
+                pendingFix: {
+                    position: index + 1,
+                    type: 'repeat-word',
+                    initialMistakenChars: extraChars,
+                    repairAfterExtraChars: Math.min(Math.max(2, context.nextWord?.word.length || 2), 3 + Math.floor(rng() * 4)),
+                    hardExtraChars: extraChars + 3 + Math.floor(rng() * 3),
+                    preferWordBoundary: true,
+                    noticePause: (0.38 + rng() * 0.34) * draftProfile.noticePauseFactor,
+                    realignPause: (0.1 + rng() * 0.12) * draftProfile.realignPauseFactor
+                }
+            };
+        }
+
+        return {
+            outputs: [],
+            initialMistakenChars: 0,
+            indexAdvance: 0,
+            cooldownChars: Math.max(46, draftProfile.cooldownChars - 4 + Math.floor(rng() * 12)),
+            pendingFix: {
+                position: index,
+                type: 'space-omit',
+                initialMistakenChars: 0,
+                repairAfterExtraChars: Math.max(1, Math.min((context.nextWord?.word.length || 4), 2 + Math.floor(rng() * 4))),
+                hardExtraChars: 4 + Math.floor(rng() * 4),
+                preferWordBoundary: true,
+                noticePause: (0.3 + rng() * 0.26) * draftProfile.noticePauseFactor,
+                realignPause: (0.08 + rng() * 0.1) * draftProfile.realignPauseFactor
+            }
+        };
+    }
+
+    function planPunctuationMistake(index, rng, baseDelay, context, draftProfile) {
+        const weights = [];
+        if (draftProfile.punctuationOmissionChance > 0) {
+            weights.push({ type: 'punct-omit', weight: draftProfile.punctuationOmissionChance });
+        }
+        if (draftProfile.punctuationSpacingChance > 0) {
+            weights.push({ type: 'space-before-punct', weight: draftProfile.punctuationSpacingChance });
+        }
+
+        const selectedType = pickWeightedType(rng, weights, null, 'punct-omit');
+        if (selectedType === 'space-before-punct') {
+            return {
+                outputs: [
+                    {
+                        char: ' ',
+                        kind: 'space-before-punct-output',
+                        delay: baseDelay * 0.72,
+                        distributionWeight: 0.34
+                    },
+                    {
+                        char: context.char,
+                        kind: 'space-before-punct-output',
+                        delay: baseDelay,
+                        distributionWeight: 0.7
+                    }
+                ],
+                initialMistakenChars: 2,
+                indexAdvance: 0,
+                cooldownChars: Math.max(52, draftProfile.cooldownChars + Math.floor(rng() * 10)),
+                pendingFix: {
+                    position: index,
+                    type: 'space-before-punct',
+                    initialMistakenChars: 2,
+                    repairAfterExtraChars: 1 + Math.floor(rng() * 3),
+                    hardExtraChars: 3 + Math.floor(rng() * 3),
+                    preferWordBoundary: true,
+                    noticePause: (0.26 + rng() * 0.24) * draftProfile.noticePauseFactor,
+                    realignPause: (0.08 + rng() * 0.08) * draftProfile.realignPauseFactor
+                }
+            };
+        }
+
+        return {
+            outputs: [],
+            initialMistakenChars: 0,
+            indexAdvance: 0,
+            cooldownChars: Math.max(52, draftProfile.cooldownChars + Math.floor(rng() * 10)),
+            pendingFix: {
+                position: index,
+                type: 'punct-omit',
+                initialMistakenChars: 0,
+                repairAfterExtraChars: 1 + Math.floor(rng() * 3),
+                hardExtraChars: 3 + Math.floor(rng() * 3),
+                preferWordBoundary: true,
+                noticePause: (0.32 + rng() * 0.28) * draftProfile.noticePauseFactor,
+                realignPause: (0.08 + rng() * 0.1) * draftProfile.realignPauseFactor
+            }
+        };
+    }
+
+    function planSmallWordSkipMistake(index, rng, context, draftProfile) {
+        const skippedChars = context.end - context.start;
+        return {
+            outputs: [],
+            initialMistakenChars: 0,
+            indexAdvance: Math.max(0, skippedChars - 1),
+            cooldownChars: Math.max(62, draftProfile.cooldownChars + 10 + Math.floor(rng() * 16)),
+            pendingFix: {
+                position: index,
+                type: 'small-word-skip',
+                initialMistakenChars: 0,
+                repairAfterExtraChars: Math.max(2, Math.min((context.nextWord?.word.length || 4), 3 + Math.floor(rng() * 3))),
+                hardExtraChars: 5 + Math.floor(rng() * 4),
+                preferWordBoundary: true,
+                noticePause: (0.38 + rng() * 0.3) * draftProfile.noticePauseFactor,
+                realignPause: (0.1 + rng() * 0.1) * draftProfile.realignPauseFactor
+            }
+        };
+    }
+
+    function selectMistakeType(rng, draftProfile, context, currentChar, nextChar, plannerState) {
         const canTranspose = isWordCharacter(nextChar);
-        const canCaseSwap = currentChar !== currentChar.toLowerCase() || currentChar !== currentChar.toUpperCase();
+        const canCaseSwap = Boolean(context?.canCaseMistake) && (currentChar !== currentChar.toLowerCase() || currentChar !== currentChar.toUpperCase());
         const loweredChar = String(currentChar || '').toLowerCase();
         const weights = [];
 
-        if (canTranspose && draftProfile.transpositionChance > 0) {
+        if (Boolean(context?.canLetterMistake) && canTranspose && draftProfile.transpositionChance > 0) {
             weights.push({ type: 'trans', weight: draftProfile.transpositionChance });
         }
-        if (draftProfile.doubleTapChance > 0) {
+        if (Boolean(context?.canLetterMistake) && draftProfile.doubleTapChance > 0) {
             weights.push({ type: 'double', weight: draftProfile.doubleTapChance });
         }
         if (canCaseSwap && draftProfile.casingErrorChance > 0) {
-            weights.push({ type: 'case', weight: draftProfile.casingErrorChance });
+            const caseWeight = draftProfile.casingErrorChance *
+                (context?.isStandaloneI ? 1.95 : context?.isSentenceStart ? 1.6 : context?.offsetInWord > 0 ? 1.08 : 1);
+            weights.push({ type: 'case', weight: caseWeight });
         }
-        if (draftProfile.omissionChance > 0) {
+        if (Boolean(context?.canLetterMistake) && draftProfile.omissionChance > 0) {
             weights.push({ type: 'omit', weight: draftProfile.omissionChance });
         }
-        if (VOWEL_SLIP_MAP[loweredChar] && draftProfile.vowelSlipChance > 0) {
+        if (Boolean(context?.canLetterMistake) && VOWEL_SLIP_MAP[loweredChar] && draftProfile.vowelSlipChance > 0) {
             weights.push({ type: 'vowel', weight: draftProfile.vowelSlipChance });
         }
-        if (SOFT_SLIP_MAP[loweredChar] && draftProfile.softSlipChance > 0) {
+        if (Boolean(context?.canLetterMistake) && SOFT_SLIP_MAP[loweredChar] && draftProfile.softSlipChance > 0) {
             weights.push({ type: 'soft', weight: draftProfile.softSlipChance });
         }
-        if (draftProfile.keyboardSlipChance > 0) {
+        if (Boolean(context?.canLetterMistake) && draftProfile.keyboardSlipChance > 0) {
             weights.push({ type: 'key', weight: draftProfile.keyboardSlipChance });
         }
 
         if (!weights.length) {
-            return 'key';
+            return 'case';
         }
 
-        let weightedPick = pickMistakeVariation(rng, plannerState) * weights.reduce((total, entry) => total + entry.weight, 0);
+        return pickWeightedType(rng, weights, plannerState, weights[weights.length - 1].type);
+    }
+
+    function pickWeightedType(rng, weights, plannerState = null, fallbackType = 'key') {
+        if (!weights.length) {
+            return fallbackType;
+        }
+
+        const totalWeight = weights.reduce((total, entry) => total + entry.weight, 0);
+        let weightedPick = (plannerState ? pickMistakeVariation(rng, plannerState) : rng()) * totalWeight;
         for (const entry of weights) {
             weightedPick -= entry.weight;
             if (weightedPick <= 0) {

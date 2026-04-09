@@ -437,7 +437,16 @@ async function validatePlanner() {
             let value = seed * 9301 + 49297;
             value %= 233280;
             return value / 233280;
-        }, highProfile, 'e', 'r', { recentTypes: [], segmentCounts: [], sentenceCounts: new Map(), sentenceIds: [], lastMistakeIndex: -Infinity, wordVariantCount: 0 });
+        }, highProfile, {
+            char: 'e',
+            wordLength: 6,
+            offsetInWord: 2,
+            remainingInWord: 3,
+            canCaseMistake: true,
+            canLetterMistake: true,
+            isSentenceStart: false,
+            isStandaloneI: false
+        }, 'e', 'r', { recentTypes: [], segmentCounts: [], sentenceCounts: new Map(), sentenceIds: [], lastMistakeIndex: -Infinity, wordVariantCount: 0 });
         sampledMistakeTypes.set(type, (sampledMistakeTypes.get(type) || 0) + 1);
     }
 
@@ -476,6 +485,28 @@ async function validatePlanner() {
 
     assert.equal(variantAverages.low, 0, 'Low intensity should keep larger word-level variants disabled.');
     assert.ok(variantAverages.high > variantAverages.medium, 'High intensity should trigger more word-level variant outputs than medium on confusable-heavy prose.');
+
+    const richMistakeText = [
+        'I am in a hurry, but I still want the typing engine to feel varied, a little sloppy, and self-correcting.',
+        'Because the draft is long enough, it should sometimes miss a comma, drop a space, repeat a word, or skip a small word before fixing itself.',
+        'I am going to the store, and I am also trying to see whether sentence starts, the letter I, and punctuation slips get corrected later.'
+    ].join(' ');
+    const mistakeTypeCounts = new Map();
+    for (let seed = 1; seed <= 220; seed += 1) {
+        const actions = hooks.buildActionPlan(richMistakeText, 320 * 60, seed, 'high');
+        for (const action of actions) {
+            if (action?.kind === 'repair-pause' && action.mistakeType) {
+                mistakeTypeCounts.set(action.mistakeType, (mistakeTypeCounts.get(action.mistakeType) || 0) + 1);
+            }
+        }
+    }
+
+    assert.ok((mistakeTypeCounts.get('punct-omit') || 0) > 0, 'High-intensity prose should allow omitted punctuation that is corrected later.');
+    assert.ok((mistakeTypeCounts.get('space-before-punct') || 0) > 0, 'High-intensity prose should allow stray spaces before punctuation that are corrected later.');
+    assert.ok(((mistakeTypeCounts.get('space-omit') || 0) + (mistakeTypeCounts.get('double-space') || 0)) > 0, 'High-intensity prose should allow spacing mistakes that are corrected later.');
+    assert.ok((mistakeTypeCounts.get('repeat-word') || 0) > 0, 'High-intensity prose should allow repeated-word mistakes that are corrected later.');
+    assert.ok((mistakeTypeCounts.get('small-word-skip') || 0) > 0, 'High-intensity prose should allow skipped small-word mistakes that are corrected later.');
+    assert.ok((mistakeTypeCounts.get('case') || 0) > 0, 'The planner should still allow capitalization mistakes that are corrected later.');
 }
 
 function createBackgroundSandbox() {
