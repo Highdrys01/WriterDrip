@@ -1,3 +1,11 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * WriterDrip source attribution
+ * Copyright (c) 2026 WriterDrip contributors
+ * If you reuse substantial parts of this project, please keep credit to:
+ * https://github.com/Highdrys01/WriterDrip
+ */
+
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -14,6 +22,15 @@ const scriptFiles = [
     'content.js',
     'popup.js'
 ];
+const attributionFiles = [
+    'shared.js',
+    'background.js',
+    'content.js',
+    'popup.js',
+    'scripts/validate.mjs'
+];
+const ATTRIBUTION_MARKER = 'WriterDrip source attribution';
+const ATTRIBUTION_REPO = 'https://github.com/Highdrys01/WriterDrip';
 
 async function main() {
     await validateManifest();
@@ -59,6 +76,24 @@ async function validateSyntax() {
 }
 
 async function validateRepositoryHygiene() {
+    for (const relativePath of attributionFiles) {
+        const source = await fs.readFile(path.join(rootDir, relativePath), 'utf8');
+        assert.match(
+            source,
+            new RegExp(ATTRIBUTION_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+            `${relativePath} should keep the WriterDrip attribution marker.`
+        );
+        assert.match(
+            source,
+            new RegExp(ATTRIBUTION_REPO.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+            `${relativePath} should keep the WriterDrip repository credit link.`
+        );
+    }
+
+    const noticeSource = await fs.readFile(path.join(rootDir, 'NOTICE.md'), 'utf8');
+    assert.match(noticeSource, /WriterDrip/i, 'NOTICE.md should identify WriterDrip.');
+    assert.match(noticeSource, /github\.com\/Highdrys01\/WriterDrip/i, 'NOTICE.md should point to the WriterDrip repository.');
+
     const trackedGoogleVerificationFiles = await findFiles(rootDir, (relativePath) =>
         /^docs\/google[a-z0-9]+\.html$/i.test(relativePath) || /^google[a-z0-9]+\.html$/i.test(relativePath)
     );

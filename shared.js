@@ -1,3 +1,11 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * WriterDrip source attribution
+ * Copyright (c) 2026 WriterDrip contributors
+ * If you reuse substantial parts of this project, please keep credit to:
+ * https://github.com/Highdrys01/WriterDrip
+ */
+
 (function () {
     const MIN_DURATION_MINS = 1;
     const MAX_DURATION_MINS = 10080;

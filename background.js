@@ -1,3 +1,11 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * WriterDrip source attribution
+ * Copyright (c) 2026 WriterDrip contributors
+ * If you reuse substantial parts of this project, please keep credit to:
+ * https://github.com/Highdrys01/WriterDrip
+ */
+
 importScripts('shared.js');
 
 const Shared = globalThis.WriterDripShared;

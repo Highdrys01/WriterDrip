@@ -90,6 +90,14 @@ Local-first, always free, and built for the Google Doc already open in your brow
 
 For the full policy text, see `PRIVACY.md`.
 
+## Credit
+
+If you reuse substantial parts of WriterDrip, please keep visible credit to the WriterDrip repository and preserve the license and notice files.
+
+- Repository: `https://github.com/Highdrys01/WriterDrip`
+- License: `MIT`
+- Notice: `NOTICE.md`
+
 ## Google Docs Version History Notes
 
 WriterDrip types into the live Google Docs editor, but Google controls how version history is displayed and grouped.
