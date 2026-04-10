@@ -468,6 +468,12 @@ async function validatePlanner() {
     assert.ok(mediumProfile.vowelSlipChance > lowProfile.vowelSlipChance, 'Medium intensity should allow more vowel-drift mistakes than low.');
     assert.ok(highProfile.softSlipChance > mediumProfile.softSlipChance, 'High intensity should allow more nearby-letter slips than medium.');
     assert.ok(highProfile.keyboardSlipChance > lowProfile.keyboardSlipChance, 'High intensity should allow more keyboard-neighbor slips than low.');
+    assert.ok(highProfile.punctuationSubstitutionChance > mediumProfile.punctuationSubstitutionChance, 'High intensity should allow more punctuation substitutions than medium.');
+    assert.ok(mediumProfile.punctuationSubstitutionChance > lowProfile.punctuationSubstitutionChance, 'Medium intensity should allow more punctuation substitutions than low.');
+    assert.ok(highProfile.multiPunctuationChance > mediumProfile.multiPunctuationChance, 'High intensity should allow more multi-punctuation bursts than medium.');
+    assert.ok(mediumProfile.multiPunctuationChance >= lowProfile.multiPunctuationChance, 'Medium intensity should preserve at least as much multi-punctuation room as low.');
+    assert.ok(highProfile.repairMessinessChance > mediumProfile.repairMessinessChance, 'High intensity should allow messier repairs than medium.');
+    assert.ok(mediumProfile.repairMessinessChance > lowProfile.repairMessinessChance, 'Medium intensity should allow messier repairs than low.');
     assert.ok(highProfile.repairDepthFactor > mediumProfile.repairDepthFactor, 'High intensity should allow deeper repairs than medium.');
     assert.ok(mediumProfile.repairDepthFactor > lowProfile.repairDepthFactor, 'Medium intensity should allow deeper repairs than low.');
     assert.ok(lowProfile.cadenceProfile && mediumProfile.cadenceProfile && highProfile.cadenceProfile, 'Draft profiles should carry a cadence profile.');
@@ -534,11 +540,15 @@ async function validatePlanner() {
         'I am going to the store, and I am also trying to see whether sentence starts, the letter I, and punctuation slips get corrected later.'
     ].join(' ');
     const mistakeTypeCounts = new Map();
-    for (let seed = 1; seed <= 220; seed += 1) {
+    let repairSlipOutputCount = 0;
+    for (let seed = 1; seed <= 260; seed += 1) {
         const actions = hooks.buildActionPlan(richMistakeText, 320 * 60, seed, 'high');
         for (const action of actions) {
             if (action?.kind === 'repair-pause' && action.mistakeType) {
                 mistakeTypeCounts.set(action.mistakeType, (mistakeTypeCounts.get(action.mistakeType) || 0) + 1);
+            }
+            if (action?.kind === 'repair-slip-output') {
+                repairSlipOutputCount += 1;
             }
         }
     }
@@ -549,6 +559,25 @@ async function validatePlanner() {
     assert.ok((mistakeTypeCounts.get('repeat-word') || 0) > 0, 'High-intensity prose should allow repeated-word mistakes that are corrected later.');
     assert.ok((mistakeTypeCounts.get('small-word-skip') || 0) > 0, 'High-intensity prose should allow skipped small-word mistakes that are corrected later.');
     assert.ok((mistakeTypeCounts.get('case') || 0) > 0, 'The planner should still allow capitalization mistakes that are corrected later.');
+    assert.ok(repairSlipOutputCount > 0, 'High-intensity prose should occasionally include messier repair slips before settling on the final correction.');
+
+    const punctuationHeavyText = [
+        'Wait, really? I paused, then rushed back in. Stop, start, breathe, and keep going!',
+        'Sometimes the sentence ends quickly. Sometimes it changes, lingers, and then snaps back into place.',
+        'What now? Keep typing, keep correcting, and do not let the punctuation feel flat or repetitive!'
+    ].join(' ');
+    const punctuationMistakeCounts = new Map();
+    for (let seed = 1; seed <= 420; seed += 1) {
+        const actions = hooks.buildActionPlan(punctuationHeavyText, 360 * 60, seed, 'high');
+        for (const action of actions) {
+            if (action?.kind === 'repair-pause' && action.mistakeType) {
+                punctuationMistakeCounts.set(action.mistakeType, (punctuationMistakeCounts.get(action.mistakeType) || 0) + 1);
+            }
+        }
+    }
+
+    assert.ok((punctuationMistakeCounts.get('punct-substitute') || 0) > 0, 'High-intensity prose should allow punctuation substitutions that are corrected later.');
+    assert.ok((punctuationMistakeCounts.get('multi-punct') || 0) > 0, 'High-intensity prose should allow occasional multi-punctuation bursts that are corrected later.');
 }
 
 function createBackgroundSandbox() {

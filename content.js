@@ -63,11 +63,15 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         doubleSpaceChance: 0.05,
         punctuationOmissionChance: 0.06,
         punctuationSpacingChance: 0.04,
+        punctuationSubstitutionChance: 0.035,
+        multiPunctuationChance: 0.03,
         repeatWordChance: 0.035,
         smallWordSkipChance: 0.03,
+        repairMessinessChance: 0.07,
         cooldownChars: 100
     };
-    const PUNCTUATION_RECOVERY_CHARS = new Set([',', ';', ':']);
+    const PUNCTUATION_RECOVERY_CHARS = new Set([',', ';', ':', '.', '!', '?']);
+    const PUNCTUATION_BURST_CHARS = new Set(['.', '!', '?']);
     const COMMON_SMALL_WORDS = new Set([
         'a',
         'an',
@@ -272,6 +276,8 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             doubleSpaceScale: 0.16,
             punctuationOmissionScale: 0.18,
             punctuationSpacingScale: 0.14,
+            punctuationSubstitutionScale: 0.08,
+            multiPunctuationScale: 0,
             repeatWordScale: 0,
             smallWordSkipScale: 0,
             spacingScale: 1.24,
@@ -285,6 +291,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             vowelSlipScale: 0.44,
             softSlipScale: 0.22,
             guaranteedMinChars: 420,
+            repairMessinessScale: 0.28,
             repairAfterExtraScale: 0.68,
             repairHardExtraScale: 0.72,
             wordVariantDelayScale: 0.78
@@ -307,6 +314,8 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             doubleSpaceScale: 0.62,
             punctuationOmissionScale: 0.76,
             punctuationSpacingScale: 0.58,
+            punctuationSubstitutionScale: 0.52,
+            multiPunctuationScale: 0.3,
             repeatWordScale: 0.42,
             smallWordSkipScale: 0.34,
             spacingScale: 1,
@@ -320,6 +329,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             vowelSlipScale: 0.92,
             softSlipScale: 0.55,
             guaranteedMinChars: 180,
+            repairMessinessScale: 0.72,
             repairAfterExtraScale: 1,
             repairHardExtraScale: 1,
             wordVariantDelayScale: 1
@@ -342,6 +352,8 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             doubleSpaceScale: 1.16,
             punctuationOmissionScale: 1.22,
             punctuationSpacingScale: 1.08,
+            punctuationSubstitutionScale: 1.18,
+            multiPunctuationScale: 1.06,
             repeatWordScale: 1.08,
             smallWordSkipScale: 0.92,
             spacingScale: 0.76,
@@ -355,6 +367,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             vowelSlipScale: 1.42,
             softSlipScale: 1.05,
             guaranteedMinChars: 95,
+            repairMessinessScale: 1.26,
             repairAfterExtraScale: 1.32,
             repairHardExtraScale: 1.38,
             wordVariantDelayScale: 1.26
@@ -1523,6 +1536,37 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
                 });
             }
 
+            if (Array.isArray(pendingFix?.repairSlipChars) &&
+                pendingFix.repairSlipChars.length > 0 &&
+                rng() < Math.max(0, pendingFix.repairMessinessChance || 0)) {
+                if (pendingFix.repairSlipPause) {
+                    actions.push({
+                        char: null,
+                        kind: 'repair-slip-pause',
+                        delay: pendingFix.repairSlipPause,
+                        distributionWeight: 0.88
+                    });
+                }
+
+                for (const slipChar of pendingFix.repairSlipChars) {
+                    actions.push({
+                        char: slipChar,
+                        kind: 'repair-slip-output',
+                        delay: 0.05 + rng() * 0.06,
+                        distributionWeight: 0.26
+                    });
+                }
+
+                for (let count = 0; count < pendingFix.repairSlipChars.length; count += 1) {
+                    actions.push({
+                        char: 'backspace',
+                        kind: 'repair-slip-backspace',
+                        delay: 0.04 + rng() * 0.05,
+                        distributionWeight: 0.24
+                    });
+                }
+            }
+
             const rewindIndex = pendingFix?.position ?? currentIndex;
             pendingFix = null;
             mistakenChars = 0;
@@ -1756,11 +1800,14 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             doubleSpaceChance: clamp((PROFILE.doubleSpaceChance + (speedStress * 0.1)) * proseFactor * (intensityProfile.doubleSpaceScale || 1), 0.01, 0.14),
             punctuationOmissionChance: clamp((PROFILE.punctuationOmissionChance + (speedStress * 0.08)) * proseFactor * (intensityProfile.punctuationOmissionScale || 1), 0.01, 0.16),
             punctuationSpacingChance: clamp((PROFILE.punctuationSpacingChance + (speedStress * 0.06)) * proseFactor * (intensityProfile.punctuationSpacingScale || 1), 0.005, 0.12),
+            punctuationSubstitutionChance: clamp((PROFILE.punctuationSubstitutionChance + (speedStress * 0.05)) * proseFactor * (intensityProfile.punctuationSubstitutionScale || 0), 0, 0.12),
+            multiPunctuationChance: clamp((PROFILE.multiPunctuationChance + (speedStress * 0.04)) * proseFactor * (intensityProfile.multiPunctuationScale || 0), 0, 0.1),
             repeatWordChance: clamp((PROFILE.repeatWordChance + (speedStress * 0.08)) * proseFactor * (intensityProfile.repeatWordScale || 0), 0, 0.14),
             smallWordSkipChance: clamp((PROFILE.smallWordSkipChance + (speedStress * 0.06)) * proseFactor * (intensityProfile.smallWordSkipScale || 0), 0, 0.12),
             keyboardSlipChance: clamp((0.22 + (averageWordLength > 4.5 ? 0.03 : 0)) * (intensityProfile.keyboardSlipScale || 1), 0.08, 0.38),
             vowelSlipChance: clamp((0.1 + (averageWordLength > 4.8 ? 0.03 : 0) + (proseFactor > 1.02 ? 0.02 : 0)) * (intensityProfile.vowelSlipScale || 1), 0.03, 0.24),
             softSlipChance: clamp((0.06 + (wordCount >= 40 ? 0.02 : 0)) * technicalGuard * (intensityProfile.softSlipScale || 1), 0.01, 0.18),
+            repairMessinessChance: clamp((PROFILE.repairMessinessChance + (speedStress * 0.08)) * (intensityProfile.repairMessinessScale || 0.4), 0.01, 0.24),
             immediateRepairChance: clamp(0.34 - ((paceFactor - 1) * 0.18) + intensityProfile.immediateRepairOffset, 0.14, 0.44),
             preferWordBoundaryChance: clamp(0.48 + ((proseFactor - 1) * 0.5) + intensityProfile.wordBoundaryOffset, 0.36, 0.72),
             repairDepthFactor: clamp((0.45 + ((paceFactor - 1) * 0.3) + ((proseFactor - 1) * 0.4)) * intensityProfile.repairDepthScale, 0.34, 0.84),
@@ -2188,7 +2235,13 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             return null;
         }
 
-        if (!draftProfile.punctuationOmissionChance && !draftProfile.punctuationSpacingChance) {
+        const substitutionTargets = getPunctuationSubstitutionTargets(char);
+        const canBurst = PUNCTUATION_BURST_CHARS.has(char);
+
+        if (!draftProfile.punctuationOmissionChance &&
+            !draftProfile.punctuationSpacingChance &&
+            !draftProfile.punctuationSubstitutionChance &&
+            !(canBurst && draftProfile.multiPunctuationChance > 0)) {
             return null;
         }
 
@@ -2197,6 +2250,8 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             char,
             start: index,
             end: index + 1,
+            substitutionTargets,
+            canBurst,
             wordLength: 1,
             offsetInWord: 0,
             remainingInWord: 0
@@ -2337,9 +2392,20 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         }
 
         if (context.kind === 'punctuation') {
-            let chance = (draftProfile.punctuationOmissionChance + draftProfile.punctuationSpacingChance) * 0.95;
+            let chance = (
+                draftProfile.punctuationOmissionChance +
+                draftProfile.punctuationSpacingChance +
+                draftProfile.punctuationSubstitutionChance +
+                draftProfile.multiPunctuationChance
+            ) * 0.88;
             chance *= fatigueMultiplier;
             chance *= 0.94 + Math.min(sentenceLength * 0.012, 0.24);
+            if ((context.substitutionTargets?.length || 0) === 0) {
+                chance *= 0.94;
+            }
+            if (!context.canBurst) {
+                chance *= 0.96;
+            }
             const usageRatio = mistakeCount / Math.max(1, draftProfile.maxMistakes);
             chance *= clamp(1 - (usageRatio * 0.5), 0.42, 1);
             return chance;
@@ -2504,7 +2570,10 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
                 hardExtraChars,
                 preferWordBoundary,
                 noticePause: (0.34 + rng() * 0.34 + Math.min(repairAfterExtraChars * 0.05, 0.18)) * draftProfile.noticePauseFactor,
-                realignPause: (0.08 + rng() * 0.14 + Math.min(context.wordLength * 0.01, 0.08)) * draftProfile.realignPauseFactor
+                realignPause: (0.08 + rng() * 0.14 + Math.min(context.wordLength * 0.01, 0.08)) * draftProfile.realignPauseFactor,
+                repairMessinessChance: draftProfile.repairMessinessChance,
+                repairSlipChars: buildRepairSlipChars(char, rng, 'letter'),
+                repairSlipPause: (0.05 + rng() * 0.05) * draftProfile.realignPauseFactor
             }
         };
         const mistakeType = selectMistakeType(rng, draftProfile, context, char, nextChar, plannerState);
@@ -2708,6 +2777,12 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         if (draftProfile.punctuationSpacingChance > 0) {
             weights.push({ type: 'space-before-punct', weight: draftProfile.punctuationSpacingChance });
         }
+        if (context.substitutionTargets?.length && draftProfile.punctuationSubstitutionChance > 0) {
+            weights.push({ type: 'punct-substitute', weight: draftProfile.punctuationSubstitutionChance });
+        }
+        if (context.canBurst && draftProfile.multiPunctuationChance > 0) {
+            weights.push({ type: 'multi-punct', weight: draftProfile.multiPunctuationChance });
+        }
 
         const selectedType = pickWeightedType(rng, weights, null, 'punct-omit');
         if (selectedType === 'space-before-punct') {
@@ -2737,7 +2812,76 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
                     hardExtraChars: 3 + Math.floor(rng() * 3),
                     preferWordBoundary: true,
                     noticePause: (0.26 + rng() * 0.24) * draftProfile.noticePauseFactor,
-                    realignPause: (0.08 + rng() * 0.08) * draftProfile.realignPauseFactor
+                    realignPause: (0.08 + rng() * 0.08) * draftProfile.realignPauseFactor,
+                    repairMessinessChance: draftProfile.repairMessinessChance * 0.82,
+                    repairSlipChars: [' '],
+                    repairSlipPause: (0.04 + rng() * 0.04) * draftProfile.realignPauseFactor
+                }
+            };
+        }
+
+        if (selectedType === 'punct-substitute') {
+            const replacementChar = pickPunctuationSubstitution(context.char, rng);
+            return {
+                outputs: [
+                    {
+                        char: replacementChar,
+                        kind: 'punct-substitute-output',
+                        delay: baseDelay,
+                        distributionWeight: 0.74
+                    }
+                ],
+                initialMistakenChars: 1,
+                indexAdvance: 0,
+                cooldownChars: Math.max(52, draftProfile.cooldownChars + Math.floor(rng() * 10)),
+                pendingFix: {
+                    position: index,
+                    type: 'punct-substitute',
+                    initialMistakenChars: 1,
+                    repairAfterExtraChars: 1 + Math.floor(rng() * 3),
+                    hardExtraChars: 3 + Math.floor(rng() * 3),
+                    preferWordBoundary: true,
+                    noticePause: (0.3 + rng() * 0.24) * draftProfile.noticePauseFactor,
+                    realignPause: (0.08 + rng() * 0.08) * draftProfile.realignPauseFactor,
+                    repairMessinessChance: draftProfile.repairMessinessChance * 0.92,
+                    repairSlipChars: buildRepairSlipChars(context.char, rng, 'punctuation'),
+                    repairSlipPause: (0.05 + rng() * 0.04) * draftProfile.realignPauseFactor
+                }
+            };
+        }
+
+        if (selectedType === 'multi-punct') {
+            const burstChars = buildMultiPunctuationBurst(context.char, rng);
+            return {
+                outputs: [
+                    {
+                        char: context.char,
+                        kind: 'multi-punct-output',
+                        delay: baseDelay,
+                        distributionWeight: 0.72
+                    },
+                    ...burstChars.map((char, burstIndex) => ({
+                        char,
+                        kind: 'multi-punct-output',
+                        delay: baseDelay * (0.48 + (rng() * 0.18) + (burstIndex * 0.06)),
+                        distributionWeight: 0.28
+                    }))
+                ],
+                initialMistakenChars: burstChars.length,
+                indexAdvance: 0,
+                cooldownChars: Math.max(56, draftProfile.cooldownChars + 6 + Math.floor(rng() * 12)),
+                pendingFix: {
+                    position: index + 1,
+                    type: 'multi-punct',
+                    initialMistakenChars: burstChars.length,
+                    repairAfterExtraChars: 1 + Math.floor(rng() * 2),
+                    hardExtraChars: 3 + Math.floor(rng() * 3),
+                    preferWordBoundary: true,
+                    noticePause: (0.28 + rng() * 0.24) * draftProfile.noticePauseFactor,
+                    realignPause: (0.07 + rng() * 0.08) * draftProfile.realignPauseFactor,
+                    repairMessinessChance: draftProfile.repairMessinessChance * 0.8,
+                    repairSlipChars: buildRepairSlipChars(context.char, rng, 'punctuation'),
+                    repairSlipPause: (0.04 + rng() * 0.04) * draftProfile.realignPauseFactor
                 }
             };
         }
@@ -2755,7 +2899,10 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
                 hardExtraChars: 3 + Math.floor(rng() * 3),
                 preferWordBoundary: true,
                 noticePause: (0.32 + rng() * 0.28) * draftProfile.noticePauseFactor,
-                realignPause: (0.08 + rng() * 0.1) * draftProfile.realignPauseFactor
+                realignPause: (0.08 + rng() * 0.1) * draftProfile.realignPauseFactor,
+                repairMessinessChance: draftProfile.repairMessinessChance * 0.84,
+                repairSlipChars: buildRepairSlipChars(context.char, rng, 'punctuation'),
+                repairSlipPause: (0.04 + rng() * 0.05) * draftProfile.realignPauseFactor
             }
         };
     }
@@ -2775,7 +2922,10 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
                 hardExtraChars: 5 + Math.floor(rng() * 4),
                 preferWordBoundary: true,
                 noticePause: (0.38 + rng() * 0.3) * draftProfile.noticePauseFactor,
-                realignPause: (0.1 + rng() * 0.1) * draftProfile.realignPauseFactor
+                realignPause: (0.1 + rng() * 0.1) * draftProfile.realignPauseFactor,
+                repairMessinessChance: draftProfile.repairMessinessChance * 0.56,
+                repairSlipChars: [' '],
+                repairSlipPause: (0.05 + rng() * 0.04) * draftProfile.realignPauseFactor
             }
         };
     }
@@ -2867,7 +3017,10 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
                 backspaceCount: replacementChars.length,
                 replacementChars: Array.from(context.originalWord),
                 noticePause: (0.42 + rng() * 0.4 + Math.min(context.wordLength * 0.025, 0.16)) * draftProfile.noticePauseFactor,
-                realignPause: (0.14 + rng() * 0.18 + Math.min(context.wordLength * 0.018, 0.1)) * draftProfile.realignPauseFactor
+                realignPause: (0.14 + rng() * 0.18 + Math.min(context.wordLength * 0.018, 0.1)) * draftProfile.realignPauseFactor,
+                repairMessinessChance: draftProfile.repairMessinessChance,
+                repairSlipChars: buildRepairSlipChars(context.originalWord[0] || context.replacementWord[0] || '', rng, 'word-variant'),
+                repairSlipPause: (0.07 + rng() * 0.05) * draftProfile.realignPauseFactor
             }
         };
     }
@@ -3240,6 +3393,81 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
 
         const next = options[Math.floor(rng() * options.length)];
         return char === char.toUpperCase() ? next.toUpperCase() : next;
+    }
+
+    function getPunctuationSubstitutionTargets(char) {
+        switch (char) {
+            case ',':
+                return ['.', ';', ':'];
+            case '.':
+                return [',', '!', '?'];
+            case '!':
+                return ['?', '.'];
+            case '?':
+                return ['!', '.'];
+            case ';':
+                return [',', ':', '.'];
+            case ':':
+                return [';', ',', '.'];
+            default:
+                return [];
+        }
+    }
+
+    function pickPunctuationSubstitution(char, rng) {
+        const options = getPunctuationSubstitutionTargets(char);
+        if (!options.length) {
+            return char;
+        }
+
+        return options[Math.floor(rng() * options.length)];
+    }
+
+    function buildMultiPunctuationBurst(char, rng) {
+        const burst = [];
+        const extraCount = rng() < 0.35 ? 2 : 1;
+        for (let index = 0; index < extraCount; index += 1) {
+            if (char === '!') {
+                burst.push(rng() < 0.22 && index === extraCount - 1 ? '?' : '!');
+            } else if (char === '?') {
+                burst.push(rng() < 0.22 && index === extraCount - 1 ? '!' : '?');
+            } else if (char === '.') {
+                burst.push(rng() < 0.28 ? (rng() < 0.5 ? '!' : '?') : '.');
+            } else {
+                burst.push(char);
+            }
+        }
+        return burst;
+    }
+
+    function buildRepairSlipChars(sourceChar, rng, channel = 'letter') {
+        if (channel === 'punctuation') {
+            const slipChar = pickPunctuationSubstitution(sourceChar || '.', rng);
+            return slipChar ? [slipChar] : [];
+        }
+
+        if (channel === 'space') {
+            return [' '];
+        }
+
+        if (/[A-Za-z]/.test(sourceChar || '')) {
+            const roll = rng();
+            if (roll < 0.42) {
+                return [getAdjacentKey(sourceChar, rng)];
+            }
+            if (roll < 0.72) {
+                return [getSoftSlip(sourceChar, rng)];
+            }
+            if (sourceChar.toLowerCase() !== sourceChar.toUpperCase()) {
+                return [sourceChar === sourceChar.toUpperCase() ? sourceChar.toLowerCase() : sourceChar.toUpperCase()];
+            }
+        }
+
+        if (/[0-9]/.test(sourceChar || '')) {
+            return [getAdjacentKey(sourceChar, rng)];
+        }
+
+        return [' '];
     }
 
     function createRng(seed) {
