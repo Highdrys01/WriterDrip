@@ -606,8 +606,12 @@ function syncButtons() {
     const hasActiveTab = Boolean(currentTabId);
     const hasActiveRun = Boolean(sessionState.activeJob);
     const onGoogleDoc = currentPageKind === PAGE_KINDS.GOOGLE_DOC;
+    const preflightBlockingStart = shouldShowPreflightPanel() &&
+        preflightState.status === 'ready' &&
+        Boolean(preflightState.report) &&
+        !preflightState.report.ready;
 
-    startBtn.disabled = uiBusy || !onGoogleDoc || !hasActiveTab || !hasDraft || !validDuration || hasActiveRun;
+    startBtn.disabled = uiBusy || !onGoogleDoc || !hasActiveTab || !hasDraft || !validDuration || hasActiveRun || preflightBlockingStart;
     clearBtn.disabled = uiBusy || inputText.value.length === 0;
     pauseBtn.disabled = uiBusy || !hasActiveRun || !onGoogleDoc || (sessionState.state === 'attention' && !canResumeAttentionState(sessionState.attentionCode));
     stopBtn.disabled = uiBusy || !hasActiveRun;

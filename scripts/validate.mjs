@@ -272,6 +272,48 @@ async function validateBackgroundRuntime() {
     assert.equal(completedFromProgress.activeRunId, null, 'Completed progress updates should clear the active run id even if the final completion message is missed.');
     assert.equal(completedFromProgress.state, hooks.SESSION_STATES.COMPLETE, 'Completed progress updates should move the session into the complete state.');
     assert.equal(completedFromProgress.lastCompletedVerification?.verified, true, 'Completed progress updates should preserve completion verification details.');
+
+    backgroundSandbox.chrome.tabs.get = async (tabId) => {
+        if (tabId === 11) {
+            return { id: 11, status: 'complete', url: 'https://docs.google.com/document/d/dup-doc/edit', discarded: false };
+        }
+        if (tabId === 21) {
+            return { id: 21, status: 'complete', url: 'https://docs.google.com/document/d/other-doc/edit', discarded: false };
+        }
+        return { id: tabId, status: 'complete', url: 'https://docs.google.com/document/d/test/edit', discarded: false };
+    };
+
+    const duplicateDocSessions = {
+        11: hooks.normalizeSession(11, {
+            activeJob: hooks.createJob({
+                text: 'A duplicate-run draft.',
+                docKey: 'dup-doc',
+                durationMins: 5,
+                correctionIntensity: 'medium'
+            }),
+            activeRunId: 'run_dup_conflict',
+            state: hooks.SESSION_STATES.RUNNING
+        }),
+        12: hooks.normalizeSession(12, {})
+    };
+    const conflictingDocRun = await hooks.findConflictingSessionForDoc(duplicateDocSessions, 12, 'dup-doc');
+    assert.equal(conflictingDocRun?.tabId, 11, 'Background runtime should detect another active run already attached to the same Google Doc.');
+
+    const staleDocSessions = {
+        21: hooks.normalizeSession(21, {
+            activeJob: hooks.createJob({
+                text: 'A stale session that moved away from the original Doc.',
+                docKey: 'dup-doc',
+                durationMins: 5,
+                correctionIntensity: 'medium'
+            }),
+            activeRunId: 'run_stale_duplicate',
+            state: hooks.SESSION_STATES.RUNNING
+        }),
+        22: hooks.normalizeSession(22, {})
+    };
+    const staleConflict = await hooks.findConflictingSessionForDoc(staleDocSessions, 22, 'dup-doc');
+    assert.equal(staleConflict, null, 'Background runtime should ignore sessions whose original tab is no longer on the same Google Doc.');
 }
 
 async function validatePopupRuntime() {

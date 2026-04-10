@@ -197,6 +197,7 @@ async function handleRunStart(tabId, url, rawJob) {
     }
 
     let runPayload = null;
+    let conflictError = null;
 
     await withSessionLock(async () => {
         const sessions = await readSessions();
@@ -204,6 +205,15 @@ async function handleRunStart(tabId, url, rawJob) {
         session.lastKnownUrl = url || session.lastKnownUrl || '';
 
         if (session.activeJob || session.activeRunId) {
+            return;
+        }
+
+        const conflictingSession = await findConflictingSessionForDoc(sessions, tabId, job.docKey);
+        if (conflictingSession) {
+            conflictError = buildErrorResponse(
+                ISSUE_CODES.ACTIVE_RUN_EXISTS,
+                'A drip for this Google Doc is already active in another tab. Return to that tab and pause or stop it before starting again here.'
+            );
             return;
         }
 
@@ -229,6 +239,10 @@ async function handleRunStart(tabId, url, rawJob) {
 
         await writeSessions(sessions);
     });
+
+    if (conflictError) {
+        return conflictError;
+    }
 
     if (!runPayload) {
         return buildErrorResponse(ISSUE_CODES.ACTIVE_RUN_EXISTS, 'A drip is already active in this tab. Pause or stop it first.');
@@ -643,7 +657,26 @@ async function restoreOrStartRun(tabId, payload) {
 
 async function runPreflightCheck(tabId, expectedDocKey) {
     try {
-        await waitForTabReady(tabId);
+        const tab = await waitForTabReady(tabId);
+        const docKey = expectedDocKey || extractGoogleDocKeyFromUrl(tab?.url || '');
+
+        if (docKey) {
+            const sessions = await readSessions();
+            const conflictingSession = await findConflictingSessionForDoc(sessions, tabId, docKey);
+            if (conflictingSession) {
+                return buildPreflightReport({
+                    ready: false,
+                    code: ISSUE_CODES.ACTIVE_RUN_EXISTS,
+                    message: 'A drip for this Google Doc is already active in another tab.',
+                    checks: [
+                        buildPreflightCheck('doc-tab', 'Google Doc tab available', true, 'WriterDrip can reach this Google Doc tab.'),
+                        buildPreflightCheck('duplicate-doc-run', 'No duplicate run for this document', false, 'Return to the other tab using this same Google Doc and pause or stop the existing drip first.')
+                    ],
+                    note: 'WriterDrip binds one active run to one Google Doc at a time so duplicate tabs do not type into the same document at once.'
+                });
+            }
+        }
+
         await ensureRunnerInjected(tabId);
         const response = await sendRunnerMessageWithCompatibility(tabId, {
             type: 'writerdrip:probe-editor',
@@ -1092,6 +1125,37 @@ async function adoptMatchingSessionForTab(tabId, url, sessions = null) {
     return false;
 }
 
+async function findConflictingSessionForDoc(sessions, tabId, docKey) {
+    if (!docKey) {
+        return null;
+    }
+
+    for (const [sessionTabId, session] of Object.entries(sessions)) {
+        const numericSessionTabId = Number.parseInt(sessionTabId, 10);
+        if (!Number.isFinite(numericSessionTabId) || numericSessionTabId === tabId) {
+            continue;
+        }
+
+        if (!session?.activeJob || !session?.activeRunId || session.activeJob.docKey !== docKey) {
+            continue;
+        }
+
+        try {
+            const existingTab = await chrome.tabs.get(numericSessionTabId);
+            if (extractGoogleDocKeyFromUrl(existingTab?.url || '') === docKey) {
+                return {
+                    tabId: numericSessionTabId,
+                    state: session.state
+                };
+            }
+        } catch (_error) {
+            continue;
+        }
+    }
+
+    return null;
+}
+
 function createId(prefix) {
     return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -1409,6 +1473,7 @@ globalThis.__writerdripBackgroundTestHooks = Object.freeze({
     markSessionAwaitingTabReopen,
     normalizeSession,
     applyRuntimeSnapshotToSession,
+    findConflictingSessionForDoc,
     handleRunnerProgress,
     readSessions,
     writeSessions

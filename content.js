@@ -562,6 +562,21 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
                 return;
             }
 
+            if (runner.runId !== expectedRunId) {
+                resetRunner();
+                return;
+            }
+
+            if (runner.stopRequested) {
+                resetRunner();
+                return;
+            }
+
+            if (runner.paused) {
+                await reportProgress(true);
+                continue;
+            }
+
             const targetReady = await ensureActiveTarget();
             if (!targetReady) {
                 const issue = getTypingContextIssue(runner.lockedElement);
