@@ -59,6 +59,7 @@ const recoveryMetaEl = document.getElementById('recoveryMeta');
 const recoverySummaryEl = document.getElementById('recoverySummary');
 const recoveryToggleBtn = document.getElementById('recoveryToggle');
 const recoveryBodyEl = document.getElementById('recoveryBody');
+const recoveryChecksEl = document.getElementById('recoveryChecks');
 const recoveryStepsEl = document.getElementById('recoverySteps');
 const recoveryNoteEl = document.getElementById('recoveryNote');
 const completionPanel = document.getElementById('completionPanel');
@@ -155,6 +156,11 @@ let preflightState = {
     report: null,
     requestKey: ''
 };
+let resumeConfidenceState = {
+    status: 'idle',
+    report: null,
+    requestKey: ''
+};
 let panelState = {
     preflight: { expanded: false, signature: '' },
     recovery: { expanded: false, signature: '' },
@@ -162,6 +168,8 @@ let panelState = {
 };
 let preflightTimer = null;
 let preflightRequestId = 0;
+let resumeConfidenceTimer = null;
+let resumeConfidenceRequestId = 0;
 
 document.addEventListener('DOMContentLoaded', async () => {
     updateTextStats();
@@ -294,6 +302,7 @@ function bindEvents() {
         applyPageBadge();
         render();
         queuePreflightRefresh(true);
+        queueResumeConfidenceRefresh(true);
     });
 }
 
@@ -360,6 +369,7 @@ async function refreshSessionState() {
 
     render();
     queuePreflightRefresh(true);
+    queueResumeConfidenceRefresh(true);
 }
 
 function normalizeUiState(rawState) {
@@ -433,7 +443,8 @@ function renderPreflightPanel() {
 
 function renderRecoveryPanel() {
     const code = sessionState.attentionCode || sessionState.lastErrorCode;
-    const shouldShow = Boolean((sessionState.attentionMessage || sessionState.lastError) && code);
+    const resumeIntent = Boolean(sessionState.activeJob) && (sessionState.isPaused || sessionState.state === 'attention');
+    const shouldShow = resumeIntent && (Boolean(code) || resumeConfidenceState.status === 'loading' || Boolean(resumeConfidenceState.report));
     recoveryPanel.hidden = !shouldShow;
     if (!shouldShow) {
         setPanelVisibility(recoveryToggleBtn, recoveryBodyEl, false, false, 'Show steps', 'Hide steps');
@@ -441,16 +452,36 @@ function renderRecoveryPanel() {
     }
 
     const wizard = buildRecoveryWizard(code);
-    recoveryMetaEl.innerText = canResumeAttentionState(code) ? 'Resume available' : 'Restart required';
-    recoverySummaryEl.innerText = sessionState.lastError || sessionState.attentionMessage || wizard.summary;
+    const confidenceReport = resumeConfidenceState.report;
+    if (!canResumeAttentionState(code)) {
+        recoveryMetaEl.innerText = 'Restart required';
+    } else if (resumeConfidenceState.status === 'loading') {
+        recoveryMetaEl.innerText = 'Checking';
+    } else if (confidenceReport) {
+        recoveryMetaEl.innerText = formatRecoveryConfidence(confidenceReport);
+    } else {
+        recoveryMetaEl.innerText = 'Resume available';
+    }
+
+    recoverySummaryEl.innerText = sessionState.lastError || sessionState.attentionMessage || confidenceReport?.message || wizard.summary;
+    recoveryChecksEl.innerHTML = renderCheckListMarkup(confidenceReport?.checks || []);
     recoveryStepsEl.innerHTML = renderStepListMarkup(wizard.steps);
-    recoveryNoteEl.innerText = wizard.note;
-    const hasDetails = Boolean((wizard.steps && wizard.steps.length) || wizard.note);
+    recoveryNoteEl.innerText = [confidenceReport?.note || '', wizard.note || ''].filter(Boolean).join(' ');
+    const hasDetails = Boolean(
+        (confidenceReport?.checks && confidenceReport.checks.length) ||
+        (wizard.steps && wizard.steps.length) ||
+        confidenceReport?.note ||
+        wizard.note
+    );
     const signature = [
         code || 'no-code',
         sessionState.lastError || '',
         sessionState.attentionMessage || '',
+        confidenceReport?.confidence || 'no-confidence',
+        confidenceReport?.canResume ? 'resume' : 'blocked',
+        confidenceReport?.checks?.length || 0,
         wizard.steps?.length || 0,
+        confidenceReport?.note || '',
         wizard.note || ''
     ].join('|');
     ensurePanelState('recovery', signature, !canResumeAttentionState(code) || Boolean(sessionState.lastError));
@@ -523,7 +554,9 @@ function renderStatus() {
         setStatus({
             title: 'Drip paused',
             message: `${sessionState.eta} remaining on the active run.`,
-            hint: 'You can leave this paused and come back later. Reopen the same Google Doc and press Resume when you are ready.',
+            hint: resumeConfidenceState.report?.canResume === false
+                ? (resumeConfidenceState.report.note || 'Review the recovery panel before resuming this run.')
+                : 'You can leave this paused and come back later. Reopen the same Google Doc and press Resume when you are ready.',
             tone: 'muted'
         });
         return;
@@ -562,7 +595,9 @@ function renderStatus() {
         setStatus({
             title: 'Duration too short',
             message: `This draft needs at least ${formatDuration(minimumDuration)} to run cleanly.`,
-            hint: 'WriterDrip uses a draft-sized minimum so it has enough time to finish the full typing process.',
+            hint: draftAnalysis.recommendedDurationMins > minimumDuration
+                ? `The hard minimum is ${formatDuration(minimumDuration)}, but WriterDrip recommends ${formatDuration(draftAnalysis.recommendedDurationMins)} for this draft.`
+                : 'WriterDrip uses a draft-sized minimum so it has enough time to finish the full typing process.',
             tone: 'warn'
         });
         return;
@@ -592,7 +627,9 @@ function renderStatus() {
     setStatus({
         title: 'Ready to start',
         message: 'WriterDrip is ready in the current Google Doc.',
-        hint: 'Click inside the document body first if Google Docs just loaded. You can pause later if you want to continue another time.',
+        hint: draftAnalysis.recommendedDurationMins > minimumDuration
+            ? `${draftAnalysis.recommendedDurationReason || 'WriterDrip recommends a little more room than the minimum for this draft.'} The hard minimum is still ${formatDuration(minimumDuration)}.`
+            : 'Click inside the document body first if Google Docs just loaded. You can pause later if you want to continue another time.',
         tone: 'muted'
     });
 }
@@ -606,19 +643,30 @@ function syncButtons() {
     const hasActiveTab = Boolean(currentTabId);
     const hasActiveRun = Boolean(sessionState.activeJob);
     const onGoogleDoc = currentPageKind === PAGE_KINDS.GOOGLE_DOC;
+    const resumeIntent = hasActiveRun && (sessionState.isPaused || sessionState.state === 'attention');
     const preflightBlockingStart = shouldShowPreflightPanel() &&
         preflightState.status === 'ready' &&
         Boolean(preflightState.report) &&
         !preflightState.report.ready;
+    const resumeBlocking = resumeIntent &&
+        (resumeConfidenceState.status === 'loading' ||
+            (resumeConfidenceState.status === 'ready' &&
+                Boolean(resumeConfidenceState.report) &&
+                !resumeConfidenceState.report.canResume));
 
     startBtn.disabled = uiBusy || !onGoogleDoc || !hasActiveTab || !hasDraft || !validDuration || hasActiveRun || preflightBlockingStart;
     clearBtn.disabled = uiBusy || inputText.value.length === 0;
-    pauseBtn.disabled = uiBusy || !hasActiveRun || !onGoogleDoc || (sessionState.state === 'attention' && !canResumeAttentionState(sessionState.attentionCode));
+    pauseBtn.disabled = uiBusy || !hasActiveRun || !onGoogleDoc || (sessionState.state === 'attention' && !canResumeAttentionState(sessionState.attentionCode)) || resumeBlocking;
     stopBtn.disabled = uiBusy || !hasActiveRun;
 
     startBtn.innerText = uiBusy ? 'Working...' : hasActiveRun ? 'Drip active' : 'Start drip';
+    if (resumeIntent && resumeConfidenceState.status === 'loading') {
+        pauseBtn.innerText = 'Checking resume';
+    } else if (resumeIntent && resumeConfidenceState.report && !resumeConfidenceState.report.canResume) {
+        pauseBtn.innerText = 'Review before resume';
+    }
     durationMeta.innerText = hasDraft
-        ? `Min ${formatDurationShort(minimumDuration)}`
+        ? `Recommended ${formatDurationShort(draftAnalysis.recommendedDurationMins || minimumDuration)}`
         : formatDurationShort(durationInput.value);
 }
 
@@ -660,6 +708,19 @@ async function pauseToggle() {
     }
 
     await withUiBusy(async () => {
+        if (sessionState.isPaused || sessionState.state === 'attention') {
+            const resumeReport = await refreshResumeConfidenceReport({ force: true });
+            if (resumeReport && !resumeReport.canResume) {
+                setStatus(buildIssueStatus(
+                    resumeReport.code,
+                    resumeReport.message || 'WriterDrip could not confirm that Resume is safe right now.',
+                    resumeReport.note || 'Review the recovery panel before trying to resume again.',
+                    'warn'
+                ));
+                return;
+            }
+        }
+
         const response = await sendBackgroundMessage('runner:pause-toggle', {
             tabId: currentTabId
         });
@@ -719,7 +780,9 @@ function collectDraftJob() {
         setStatus({
             title: 'Duration too short',
             message: `Choose a duration between ${formatDuration(minimumDuration)} and ${formatDuration(MAX_DURATION_MINS)}.`,
-            hint: 'The minimum changes with draft size so WriterDrip has enough time to finish the whole typing run.',
+            hint: draftAnalysis.recommendedDurationMins > minimumDuration
+                ? `The hard minimum is ${formatDuration(minimumDuration)}, but WriterDrip recommends ${formatDuration(draftAnalysis.recommendedDurationMins)} for this draft.`
+                : 'The minimum changes with draft size so WriterDrip has enough time to finish the whole typing run.',
             tone: 'warn'
         });
         durationInput.focus();
@@ -749,6 +812,7 @@ async function handleBackgroundResponse(response, successMessage = '') {
     sessionState = normalizeUiState(response.state);
     render();
     queuePreflightRefresh(true);
+    queueResumeConfidenceRefresh(true);
 
     if (successMessage && !sessionState.lastError && !sessionState.attentionMessage && sessionState.state !== 'attention') {
         setStatus(successMessage, 'muted');
@@ -795,6 +859,19 @@ function resetPreflightState() {
     };
 }
 
+function resetResumeConfidenceState() {
+    if (resumeConfidenceTimer) {
+        clearTimeout(resumeConfidenceTimer);
+        resumeConfidenceTimer = null;
+    }
+
+    resumeConfidenceState = {
+        status: 'idle',
+        report: null,
+        requestKey: ''
+    };
+}
+
 function queuePreflightRefresh(immediate = false) {
     if (preflightTimer) {
         clearTimeout(preflightTimer);
@@ -816,6 +893,93 @@ function queuePreflightRefresh(immediate = false) {
         preflightTimer = null;
         void refreshPreflightReport({ force: false });
     }, 180);
+}
+
+function shouldShowResumeConfidencePanel() {
+    return currentPageKind === PAGE_KINDS.GOOGLE_DOC &&
+        Boolean(currentTabId) &&
+        Boolean(sessionState.activeJob) &&
+        (sessionState.isPaused || sessionState.state === 'attention');
+}
+
+function getResumeConfidenceRequestKey() {
+    return [
+        currentTabId || 'no-tab',
+        currentPageKind || 'no-page-kind',
+        currentTabUrl || 'no-url',
+        sessionState.state || 'no-state',
+        sessionState.attentionCode || 'no-attention',
+        sessionState.activeJob?.docKey || 'no-doc',
+        sessionState.activeJob?.id || 'no-job'
+    ].join('|');
+}
+
+function queueResumeConfidenceRefresh(immediate = false) {
+    if (resumeConfidenceTimer) {
+        clearTimeout(resumeConfidenceTimer);
+        resumeConfidenceTimer = null;
+    }
+
+    if (!shouldShowResumeConfidencePanel()) {
+        resetResumeConfidenceState();
+        render();
+        return;
+    }
+
+    if (immediate) {
+        void refreshResumeConfidenceReport({ force: false });
+        return;
+    }
+
+    resumeConfidenceTimer = setTimeout(() => {
+        resumeConfidenceTimer = null;
+        void refreshResumeConfidenceReport({ force: false });
+    }, 180);
+}
+
+async function refreshResumeConfidenceReport(options = {}) {
+    if (!shouldShowResumeConfidencePanel()) {
+        resetResumeConfidenceState();
+        render();
+        return null;
+    }
+
+    const requestKey = getResumeConfidenceRequestKey();
+    if (!options.force && resumeConfidenceState.status === 'ready' && resumeConfidenceState.requestKey === requestKey) {
+        return resumeConfidenceState.report;
+    }
+
+    resumeConfidenceState.status = 'loading';
+    resumeConfidenceState.requestKey = requestKey;
+    render();
+
+    const requestId = ++resumeConfidenceRequestId;
+    const expectedRequestKey = requestKey;
+    const response = await sendBackgroundMessage('ui:resume-confidence', {
+        tabId: currentTabId,
+        url: currentTabUrl
+    });
+
+    if (requestId !== resumeConfidenceRequestId || expectedRequestKey !== getResumeConfidenceRequestKey()) {
+        return resumeConfidenceState.report;
+    }
+
+    const report = normalizeResumeConfidenceReport(response?.ok ? response.report : {
+        canResume: false,
+        confidence: 'low',
+        code: response?.errorCode || 'background-unavailable',
+        message: response?.error || 'WriterDrip could not verify whether Resume is safe right now.',
+        checks: [],
+        note: 'Reload the extension if Resume keeps failing to verify.'
+    });
+
+    resumeConfidenceState = {
+        status: 'ready',
+        report,
+        requestKey
+    };
+    render();
+    return report;
 }
 
 async function refreshPreflightReport(options = {}) {
@@ -944,8 +1108,8 @@ function buildCompatibilityPreflightReport(context = {}) {
                 label: 'Duration fits this draft',
                 pass: validDuration,
                 detail: validDuration
-                    ? `Current duration: ${formatDuration(durationValue)}.`
-                    : `Use at least ${formatDuration(draftAnalysis.minimumDurationMins)} for this draft.`
+                    ? `Current duration: ${formatDuration(durationValue)}. Recommended: ${formatDuration(draftAnalysis.recommendedDurationMins || draftAnalysis.minimumDurationMins)}.`
+                    : `Use at least ${formatDuration(draftAnalysis.minimumDurationMins)} for this draft. Recommended: ${formatDuration(draftAnalysis.recommendedDurationMins || draftAnalysis.minimumDurationMins)}.`
             },
             {
                 id: 'compatibility',
@@ -975,7 +1139,57 @@ function normalizePreflightReport(report) {
     };
 }
 
+function normalizeResumeConfidenceReport(report) {
+    return {
+        canResume: Boolean(report?.canResume),
+        confidence: report?.confidence || 'low',
+        code: report?.code || inferIssueCode(report?.message),
+        message: report?.message || '',
+        checks: Array.isArray(report?.checks)
+            ? report.checks.map((check) => ({
+                id: check.id || '',
+                label: check.label || '',
+                pass: Boolean(check.pass),
+                detail: check.detail || ''
+            }))
+            : [],
+        note: report?.note || ''
+    };
+}
+
+function formatRecoveryConfidence(report) {
+    if (!report) {
+        return 'Resume available';
+    }
+
+    if (!report.canResume) {
+        return report.confidence === 'blocked' ? 'Restart required' : 'Review before resume';
+    }
+
+    if (report.confidence === 'high') {
+        return 'High confidence';
+    }
+    if (report.confidence === 'medium') {
+        return 'Medium confidence';
+    }
+
+    return 'Resume available';
+}
+
 function buildRecoveryWizard(code) {
+    if (!code) {
+        return {
+            summary: 'WriterDrip can re-check this paused run before resuming.',
+            steps: [
+                'Return to the same Google Doc if you switched away from it.',
+                'Wait for the document to finish loading completely.',
+                'Click once inside the main document body.',
+                'Press Resume when the recovery confidence looks good.'
+            ],
+            note: 'WriterDrip checks the same document, editor surface, and typing context again before it resumes a paused run.'
+        };
+    }
+
     if (code === 'tab-suspended') {
         return {
             summary: 'The original Google Doc tab was suspended, reloaded, or closed during the run.',
@@ -1448,7 +1662,7 @@ function inferIssueCode(message = '') {
     if (lower.includes('place the cursor')) {
         return 'editor-focus-failed';
     }
-    if (lower.includes('another editable field has focus') || lower.includes('visible google docs page surface')) {
+    if (lower.includes('another editable field has focus') || lower.includes('visible google docs page surface') || lower.includes('selected text')) {
         return 'typing-context-lost';
     }
     if (lower.includes('page changed while a drip was active')) {
@@ -1545,5 +1759,6 @@ async function readLocal(key) {
 
 globalThis.__writerdripPopupTestHooks = {
     buildCompatibilityPreflightReport,
-    shouldUseCompatibilityPreflight
+    shouldUseCompatibilityPreflight,
+    normalizeResumeConfidenceReport
 };

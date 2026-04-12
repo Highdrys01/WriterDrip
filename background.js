@@ -163,6 +163,11 @@ async function handleMessage(message, sender) {
                 ok: true,
                 report: await handleUiPreflight(message.tabId, message.url || '', message.expectedDocKey || null)
             };
+        case 'ui:resume-confidence':
+            return {
+                ok: true,
+                report: await handleUiResumeConfidence(message.tabId, message.url || '')
+            };
         case 'run:start':
             return handleRunStart(message.tabId, message.url || '', message.job);
         case 'runner:pause-toggle':
@@ -308,6 +313,15 @@ async function handlePauseToggle(tabId) {
             );
         }
 
+        const resumeReport = await runResumeConfidenceCheck(tabId, session);
+        if (!resumeReport.canResume) {
+            await applyResumeConfidenceFailure(tabId, session, resumeReport);
+            return {
+                ok: true,
+                state: await getUiState(tabId)
+            };
+        }
+
         await recoverSessionForTab(tabId, { manual: true });
         return {
             ok: true,
@@ -316,6 +330,15 @@ async function handlePauseToggle(tabId) {
     }
 
     if (session.state === SESSION_STATES.PAUSED) {
+        const resumeReport = await runResumeConfidenceCheck(tabId, session);
+        if (!resumeReport.canResume) {
+            await applyResumeConfidenceFailure(tabId, session, resumeReport);
+            return {
+                ok: true,
+                state: await getUiState(tabId)
+            };
+        }
+
         try {
             const response = await sendRunnerCommand(tabId, { type: 'writerdrip:resume-job', runId: session.activeRunId });
             await withSessionLock(async () => {
@@ -637,6 +660,34 @@ async function handleUiPreflight(tabId, url, expectedDocKey) {
     return runPreflightCheck(tabId, expectedDocKey);
 }
 
+async function handleUiResumeConfidence(tabId, url) {
+    if (!tabId) {
+        return buildResumeConfidenceReport({
+            canResume: false,
+            confidence: 'blocked',
+            code: ISSUE_CODES.NO_ACTIVE_TAB,
+            message: 'No active Google Doc tab is available.',
+            checks: [
+                buildPreflightCheck('doc-tab', 'Google Doc tab available', false, 'Open the Google Doc you want to use and reopen WriterDrip.')
+            ],
+            note: 'WriterDrip can only resume from the same Google Doc while the tab, browser, and computer are available.'
+        });
+    }
+
+    if (url) {
+        await withSessionLock(async () => {
+            const sessions = await readSessions();
+            const adopted = await adoptMatchingSessionForTab(tabId, url, sessions);
+            if (adopted) {
+                await writeSessions(sessions);
+            }
+        });
+    }
+
+    const session = await getSessionSnapshot(tabId);
+    return runResumeConfidenceCheck(tabId, session);
+}
+
 async function restoreOrStartRun(tabId, payload) {
     await waitForTabReady(tabId);
     await ensureRunnerInjected(tabId);
@@ -711,6 +762,73 @@ async function runPreflightCheck(tabId, expectedDocKey) {
             note: 'If the browser or laptop sleeps, reopen the same Google Doc tab, let it reload, then run the start check again.'
         });
     }
+}
+
+async function runResumeConfidenceCheck(tabId, session) {
+    if (!session?.activeJob || !session?.activeRunId) {
+        return buildResumeConfidenceReport({
+            canResume: false,
+            confidence: 'blocked',
+            code: ISSUE_CODES.NO_ACTIVE_RUN,
+            message: 'There is no paused or interrupted drip to resume in this tab.',
+            checks: [
+                buildPreflightCheck('active-run', 'Paused or interrupted drip exists', false, 'Start a new drip first if you want WriterDrip to type in this Google Doc.')
+            ],
+            note: 'Resume is only available while WriterDrip still has an active run attached to this Google Doc.'
+        });
+    }
+
+    const recoverableState = session.state === SESSION_STATES.PAUSED || canResumeAttentionState(session.attentionCode);
+    const stateCheck = buildPreflightCheck(
+        'resume-state',
+        'Current run state supports resume',
+        recoverableState,
+        recoverableState
+            ? 'WriterDrip can attempt to continue this run from the saved checkpoint.'
+            : buildRestartRequiredMessage(session.attentionCode)
+    );
+
+    if (!recoverableState) {
+        return buildResumeConfidenceReport({
+            canResume: false,
+            confidence: 'blocked',
+            code: session.attentionCode || ISSUE_CODES.RUNTIME_ERROR,
+            message: buildRestartRequiredMessage(session.attentionCode),
+            checks: [stateCheck],
+            note: getRecoveryHint(session.attentionCode, 'Review the document, then restart the drip if you want to continue.')
+        });
+    }
+
+    const preflightReport = await runPreflightCheck(tabId, session.activeJob.docKey);
+    const checks = [stateCheck, ...(preflightReport.checks || [])];
+
+    if (!preflightReport.ready) {
+        return buildResumeConfidenceReport({
+            canResume: false,
+            confidence: 'low',
+            code: preflightReport.code || ISSUE_CODES.EDITOR_NOT_READY,
+            message: preflightReport.message || 'WriterDrip needs one more fix before it can resume.',
+            checks,
+            note: preflightReport.note || getRecoveryHint(preflightReport.code || ISSUE_CODES.EDITOR_NOT_READY, 'Review the Google Doc and try Resume again.')
+        });
+    }
+
+    const confidence = session.state === SESSION_STATES.PAUSED ? 'high' : 'medium';
+    const message = session.state === SESSION_STATES.PAUSED
+        ? 'This paused run still looks ready to resume from the same Google Doc.'
+        : 'The Google Doc looks ready again and WriterDrip can try to resume the saved run.';
+    const note = session.state === SESSION_STATES.PAUSED
+        ? 'WriterDrip checked the current Google Doc before resuming so it does not blindly continue into the wrong typing context.'
+        : 'Resume confidence is based on the current Google Doc, editor surface, typing context, and saved session state.';
+
+    return buildResumeConfidenceReport({
+        canResume: true,
+        confidence,
+        code: null,
+        message,
+        checks,
+        note
+    });
 }
 
 async function ensureRunnerInjected(tabId) {
@@ -1010,6 +1128,17 @@ function buildPreflightCheck(id, label, pass, detail) {
 function buildPreflightReport(report) {
     return {
         ready: Boolean(report?.ready),
+        code: report?.code || null,
+        message: report?.message || '',
+        checks: Array.isArray(report?.checks) ? report.checks.map((check) => buildPreflightCheck(check.id, check.label, check.pass, check.detail)) : [],
+        note: report?.note || ''
+    };
+}
+
+function buildResumeConfidenceReport(report) {
+    return {
+        canResume: Boolean(report?.canResume),
+        confidence: report?.confidence || 'low',
         code: report?.code || null,
         message: report?.message || '',
         checks: Array.isArray(report?.checks) ? report.checks.map((check) => buildPreflightCheck(check.id, check.label, check.pass, check.detail)) : [],
@@ -1404,6 +1533,26 @@ function buildRestartRequiredMessage(code) {
     }
 }
 
+async function applyResumeConfidenceFailure(tabId, session, report) {
+    await withSessionLock(async () => {
+        const sessions = await readSessions();
+        const nextSession = getSessionForTab(sessions, tabId);
+        if (nextSession.activeRunId !== session.activeRunId) {
+            return;
+        }
+
+        nextSession.state = SESSION_STATES.ATTENTION;
+        nextSession.lastErrorCode = report.code || ISSUE_CODES.RUNTIME_ERROR;
+        nextSession.lastError = report.message || 'WriterDrip could not safely resume this run yet.';
+        nextSession.attentionCode = report.code || ISSUE_CODES.RUNTIME_ERROR;
+        nextSession.attentionMessage = report.note || getRecoveryHint(report.code || ISSUE_CODES.RUNTIME_ERROR, 'Review the Google Doc, then try Resume again.');
+        nextSession.updatedAt = Date.now();
+        await writeSessions(sessions);
+    });
+
+    await syncHealthAlarm();
+}
+
 function createCodedError(code, message) {
     const error = new Error(message);
     error.code = code;
@@ -1460,7 +1609,7 @@ function inferIssueCode(message = '') {
     if (lower.includes('page changed while a drip was active')) {
         return ISSUE_CODES.PAGE_CHANGED;
     }
-    if (lower.includes('another editable field has focus') || lower.includes('visible google docs page surface')) {
+    if (lower.includes('another editable field has focus') || lower.includes('visible google docs page surface') || lower.includes('selected text')) {
         return ISSUE_CODES.TYPING_CONTEXT_LOST;
     }
 
@@ -1474,6 +1623,7 @@ globalThis.__writerdripBackgroundTestHooks = Object.freeze({
     normalizeSession,
     applyRuntimeSnapshotToSession,
     findConflictingSessionForDoc,
+    buildResumeConfidenceReport,
     handleRunnerProgress,
     readSessions,
     writeSessions

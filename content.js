@@ -397,13 +397,16 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         'beforeinput',
         'input',
         'compositionstart',
+        'focusin',
         'mousedown',
         'touchstart',
-        'paste'
+        'paste',
+        'cut',
+        'drop',
+        'selectionchange'
     ];
-    for (const eventName of interferenceEvents) {
-        document.addEventListener(eventName, handleTrustedUserInterference, true);
-    }
+    const interferenceDocuments = new Set();
+    syncInterferenceListeners();
 
     async function handleRunnerMessage(message) {
         switch (message.type) {
@@ -426,6 +429,27 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
                 return {
                     ...buildRunnerError(ISSUE_CODES.RUNTIME_ERROR, `Unknown runner message: ${message.type}`)
                 };
+        }
+    }
+
+    function syncInterferenceListeners() {
+        registerInterferenceDocument(document);
+
+        const docsIframe = document.querySelector('.docs-texteventtarget-iframe');
+        const iframeDoc = docsIframe?.contentDocument || null;
+        if (iframeDoc) {
+            registerInterferenceDocument(iframeDoc);
+        }
+    }
+
+    function registerInterferenceDocument(targetDocument) {
+        if (!targetDocument || interferenceDocuments.has(targetDocument)) {
+            return;
+        }
+
+        interferenceDocuments.add(targetDocument);
+        for (const eventName of interferenceEvents) {
+            targetDocument.addEventListener(eventName, handleTrustedUserInterference, true);
         }
     }
 
@@ -825,6 +849,8 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
     }
 
     function locateGoogleDocsTarget() {
+        syncInterferenceListeners();
+
         const directTarget = document.querySelector('textarea.docs-texteventtarget') ||
             document.querySelector('.docs-texteventtarget');
         if (isUsableGoogleDocsTarget(directTarget)) {
@@ -1109,12 +1135,29 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             return;
         }
 
+        if (event.type === 'selectionchange') {
+            const issue = getTypingContextIssue(runner.lockedElement);
+            if (issue) {
+                void failRun(issue);
+            }
+            return;
+        }
+
         if (event.type === 'keydown' && isModifierOnlyKey(event)) {
             return;
         }
 
         if (event.type === 'mousedown' || event.type === 'touchstart') {
             void failRun(ISSUE_CODES.MANUAL_INTERACTION, 'Manual interaction was detected in the Google Doc tab. Click back into the document and resume when you are ready.');
+            return;
+        }
+
+        if (event.type === 'focusin' && hasConflictingEditableFocus(runner.lockedElement)) {
+            void failRun(ISSUE_CODES.TYPING_CONTEXT_LOST, 'Another editable field took focus in Google Docs. Click back into the document body and resume when you are ready.');
+            return;
+        }
+
+        if (event.type === 'focusin') {
             return;
         }
 
@@ -1155,9 +1198,16 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         return normalized === 'insertReplacementText' ||
             normalized === 'insertCompositionText' ||
             normalized === 'insertFromPaste' ||
+            normalized === 'insertFromPasteAsQuotation' ||
             normalized === 'insertFromDrop' ||
             normalized === 'insertFromYank' ||
+            normalized === 'insertLink' ||
+            normalized === 'insertOrderedList' ||
+            normalized === 'insertUnorderedList' ||
             normalized === 'insertTranspose' ||
+            normalized === 'deleteByCut' ||
+            normalized === 'deleteByDrag' ||
+            normalized.startsWith('format') ||
             normalized.startsWith('history');
     }
 
@@ -1180,6 +1230,13 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             return {
                 code: ISSUE_CODES.TYPING_CONTEXT_LOST,
                 message: 'WriterDrip could not find the visible Google Docs page surface.'
+            };
+        }
+
+        if (hasSelectionRisk(target)) {
+            return {
+                code: ISSUE_CODES.TYPING_CONTEXT_LOST,
+                message: 'Text is selected in the Google Doc. Clear the selection or click once to place the cursor in the document body before resuming.'
             };
         }
 
@@ -1236,6 +1293,34 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         }
 
         return true;
+    }
+
+    function hasSelectionRisk(target) {
+        if (!target?.ownerDocument) {
+            return false;
+        }
+
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+            const start = target.selectionStart;
+            const end = target.selectionEnd;
+            return Number.isInteger(start) && Number.isInteger(end) && start !== end;
+        }
+
+        const ownerDoc = target.ownerDocument;
+        const selection = ownerDoc.getSelection?.();
+        if (!selection) {
+            return false;
+        }
+
+        if (selection.rangeCount > 1) {
+            return true;
+        }
+
+        if (selection.rangeCount === 1 && !selection.isCollapsed) {
+            return true;
+        }
+
+        return false;
     }
 
     function getFocusedEditableElement() {
@@ -1450,6 +1535,25 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             };
         }
 
+        const selectionReady = !hasSelectionRisk(target);
+        checks.push(buildDiagnosticCheck(
+            'selection',
+            'No active text selection',
+            selectionReady,
+            selectionReady
+                ? 'WriterDrip did not find any selected text that would be overwritten on the next keystroke.'
+                : 'Clear selected text or click once in the document body so the cursor is back in a single insertion point.'
+        ));
+
+        if (!selectionReady) {
+            return {
+                ...buildRunnerError(ISSUE_CODES.TYPING_CONTEXT_LOST, 'Text is selected in the Google Doc. Clear the selection or click once in the document body, then try again.'),
+                ready: false,
+                checks,
+                note: 'WriterDrip checks for active selections before resuming so it does not overwrite the wrong range of text.'
+            };
+        }
+
         return {
             status: 'ok',
             ready: true,
@@ -1475,12 +1579,14 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         const surfaceReady = Boolean(locateGoogleDocsSurface());
         const targetReady = Boolean(target && isUsableGoogleDocsTarget(target));
         const contextStable = Boolean(targetReady && !hasConflictingEditableFocus(target));
+        const selectionStable = Boolean(targetReady && !hasSelectionRisk(target));
 
         const checks = [
             buildDiagnosticCheck('plan-finished', 'Action plan finished', runner.completedIndex >= runner.actions.length, 'All planned typing and correction actions were delivered.'),
             buildDiagnosticCheck('doc', 'Same Google Doc still open', sameDoc, sameDoc ? 'The tab stayed on the original Google Doc.' : 'The document changed before WriterDrip could finish its final check.'),
             buildDiagnosticCheck('surface', 'Editor surface still available', surfaceReady && targetReady, surfaceReady && targetReady ? 'The Google Docs editor was still available after the last action.' : 'The editor surface was no longer fully available after the run ended.'),
-            buildDiagnosticCheck('context', 'No competing editor focus', contextStable, contextStable ? 'No other editable field was competing with the document body at the end of the run.' : 'Another editable field or transient UI may have taken focus at the end of the run.')
+            buildDiagnosticCheck('context', 'No competing editor focus', contextStable, contextStable ? 'No other editable field was competing with the document body at the end of the run.' : 'Another editable field or transient UI may have taken focus at the end of the run.'),
+            buildDiagnosticCheck('selection', 'No active text selection', selectionStable, selectionStable ? 'WriterDrip finished with a single insertion point still active in the document body.' : 'Selected text was still active at the end of the run, so review the final cursor position.')
         ];
         const verified = checks.every((check) => check.pass);
 
@@ -3681,9 +3787,12 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         runner.paused = false;
         runner.pauseStartedAtMs = 0;
         chrome.runtime?.onMessage?.removeListener?.(runtimeMessageListener);
-        for (const eventName of interferenceEvents) {
-            document.removeEventListener?.(eventName, handleTrustedUserInterference, true);
+        for (const targetDocument of interferenceDocuments) {
+            for (const eventName of interferenceEvents) {
+                targetDocument.removeEventListener?.(eventName, handleTrustedUserInterference, true);
+            }
         }
+        interferenceDocuments.clear();
     }
 
     globalThis.__writerdripTestHooks = Object.freeze({

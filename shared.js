@@ -159,13 +159,16 @@
         };
 
         const recommendation = buildCorrectionRecommendation(analysis);
+        const durationRecommendation = buildDurationRecommendation(analysis, recommendation);
 
         return {
             ...analysis,
             suggestedCorrectionIntensity: recommendation.intensity,
             suggestedCorrectionReason: recommendation.reason,
             suggestedCorrectionSignals: recommendation.signals,
-            suggestedCorrectionScore: recommendation.score
+            suggestedCorrectionScore: recommendation.score,
+            recommendedDurationMins: durationRecommendation.minutes,
+            recommendedDurationReason: durationRecommendation.reason
         };
     }
 
@@ -290,6 +293,117 @@
                     : [...positiveSignals.slice(0, 2), ...cautionSignals.slice(0, 2)].slice(0, 3),
             reason: buildCorrectionRecommendationReason(intensity, metrics, positiveSignals, cautionSignals)
         };
+    }
+
+    function buildDurationRecommendation(metrics, correctionRecommendation = null) {
+        const minimum = Math.max(MIN_DURATION_MINS, Number(metrics?.minimumDurationMins) || MIN_DURATION_MINS);
+        if (!metrics?.trimmed) {
+            return {
+                minutes: minimum,
+                reason: 'Recommended duration will appear once there is enough draft text to analyze.'
+            };
+        }
+
+        let multiplier = 1.18;
+        let additiveMins = 0;
+
+        if (metrics.wordCount >= 36) {
+            multiplier += 0.1;
+        }
+        if (metrics.wordCount >= 90) {
+            multiplier += 0.12;
+        }
+        if (metrics.wordCount >= 170) {
+            multiplier += 0.1;
+        }
+        if (metrics.paragraphCount >= 2) {
+            multiplier += 0.08;
+            additiveMins += 1;
+        }
+        if (metrics.paragraphCount >= 4) {
+            multiplier += 0.06;
+            additiveMins += 2;
+        }
+        if (metrics.sentenceCount >= 6 && metrics.averageSentenceWordCount >= 9) {
+            multiplier += 0.08;
+        }
+        if (metrics.averageWordLength >= 4.8) {
+            multiplier += 0.04;
+        }
+        if (!metrics.looksStructured) {
+            multiplier += 0.05;
+        } else {
+            multiplier -= 0.08;
+        }
+        if (metrics.punctuationRatio >= 0.028 && metrics.punctuationRatio <= 0.075) {
+            multiplier += 0.04;
+        }
+
+        const suggestedIntensity = correctionRecommendation?.intensity || 'medium';
+        if (suggestedIntensity === 'high') {
+            multiplier += 0.16;
+            additiveMins += 1;
+        } else if (suggestedIntensity === 'medium') {
+            multiplier += 0.08;
+        }
+
+        if (metrics.charCount < 160) {
+            multiplier -= 0.08;
+        }
+        if (metrics.looksStructured && metrics.symbolRatio >= 0.014) {
+            multiplier -= 0.05;
+        }
+
+        const rawMinutes = Math.max(minimum, (minimum * clamp(multiplier, 1.05, 1.9)) + additiveMins);
+        const minutes = roundRecommendedDurationMins(Math.min(MAX_DURATION_MINS, rawMinutes), minimum);
+
+        if (minutes <= minimum) {
+            return {
+                minutes: minimum,
+                reason: 'This draft is short or structured enough that the minimum duration is already a good fit.'
+            };
+        }
+
+        if (suggestedIntensity === 'high') {
+            return {
+                minutes,
+                reason: 'Recommended duration adds more room for pauses, corrections, and delayed repairs on this draft.'
+            };
+        }
+
+        if (metrics.looksStructured) {
+            return {
+                minutes,
+                reason: 'Recommended duration keeps a little extra pacing headroom without overdoing corrections on structured text.'
+            };
+        }
+
+        return {
+            minutes,
+            reason: 'Recommended duration leaves more room than the hard minimum for pacing, corrections, and clean recovery points.'
+        };
+    }
+
+    function roundRecommendedDurationMins(value, minimumDurationMins = MIN_DURATION_MINS) {
+        const minutes = Math.max(minimumDurationMins, Math.ceil(Number(value) || minimumDurationMins));
+        let step = 1;
+        if (minutes >= 1440) {
+            step = 60;
+        } else if (minutes >= 480) {
+            step = 30;
+        } else if (minutes >= 180) {
+            step = 15;
+        } else if (minutes >= 60) {
+            step = 10;
+        } else if (minutes >= 15) {
+            step = 5;
+        }
+
+        return Math.min(MAX_DURATION_MINS, Math.max(minimumDurationMins, Math.ceil(minutes / step) * step));
+    }
+
+    function clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
     }
 
     function buildCorrectionRecommendationReason(intensity, metrics, positiveSignals, cautionSignals) {

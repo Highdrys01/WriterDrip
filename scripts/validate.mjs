@@ -63,6 +63,7 @@ async function validatePopupHtml() {
     assert.match(popupHtml, /id="preflightToggle"/, 'popup.html should keep the preflight panel toggle.');
     assert.match(popupHtml, /id="recoveryPanel"/, 'popup.html should keep the recovery panel.');
     assert.match(popupHtml, /id="recoveryToggle"/, 'popup.html should keep the recovery panel toggle.');
+    assert.match(popupHtml, /id="recoveryChecks"/, 'popup.html should keep the recovery confidence checks list.');
     assert.match(popupHtml, /id="completionPanel"/, 'popup.html should keep the completion panel.');
     assert.match(popupHtml, /id="completionToggle"/, 'popup.html should keep the completion panel toggle.');
     assert.doesNotMatch(popupHtml, /id="scheduleGroup"/, 'popup.html should not ship the removed run window controls.');
@@ -360,6 +361,16 @@ async function validatePopupRuntime() {
         true,
         'Compatibility preflight should surface a failed duration check when the chosen time is too short.'
     );
+
+    const normalizedResumeConfidence = hooks.normalizeResumeConfidenceReport({
+        canResume: true,
+        confidence: 'high',
+        message: 'Resume looks safe.',
+        checks: [{ id: 'doc', label: 'Same Google Doc', pass: true, detail: 'Ready.' }]
+    });
+    assert.equal(normalizedResumeConfidence.canResume, true, 'Popup resume-confidence normalization should preserve the resumable state.');
+    assert.equal(normalizedResumeConfidence.confidence, 'high', 'Popup resume-confidence normalization should preserve the confidence label.');
+    assert.equal(normalizedResumeConfidence.checks.length, 1, 'Popup resume-confidence normalization should preserve recovery checks.');
 }
 
 async function validatePlanner() {
@@ -439,6 +450,7 @@ async function validatePlanner() {
     const shortDraftAnalysis = shared.analyzeDraftText('Quick note to finish tonight.', 5);
     assert.equal(shortDraftAnalysis.suggestedCorrectionIntensity, 'low', 'Very short drafts should stay on low suggestion.');
     assert.match(shortDraftAnalysis.suggestedCorrectionReason, /short/i, 'Short drafts should explain that they are too short for stronger correction behavior.');
+    assert.ok(shortDraftAnalysis.recommendedDurationMins >= shortDraftAnalysis.minimumDurationMins, 'Recommended duration should never fall below the minimum duration.');
     assert.equal(shared.normalizeDurationMins('2.2', 1), 3, 'Duration normalization should round partial minutes up.');
     assert.equal(shared.normalizeDurationMins('0.2', 5), 5, 'Duration normalization should respect the current draft minimum.');
     assert.equal(shared.normalizeDurationMins('abc', 5), null, 'Duration normalization should reject invalid numeric input.');
@@ -452,6 +464,8 @@ async function validatePlanner() {
     const longDraftAnalysis = shared.analyzeDraftText(scenarios[1].text, scenarios[1].durationMins);
     assert.equal(longDraftAnalysis.suggestedCorrectionIntensity, 'high', 'Long relaxed prose should suggest high correction intensity.');
     assert.ok(longDraftAnalysis.suggestedCorrectionSignals.length > 0, 'Suggested intensity should include explanation signals for longer prose.');
+    assert.ok(longDraftAnalysis.recommendedDurationMins > longDraftAnalysis.minimumDurationMins, 'Long prose should recommend more time than the hard minimum.');
+    assert.match(longDraftAnalysis.recommendedDurationReason, /recommended|room|pacing|corrections/i, 'Recommended duration should explain why extra headroom helps the draft.');
 
     const longChars = Array.from(scenarios[1].text);
     const lowProfile = hooks.buildDraftMistakeProfile(longChars, scenarios[1].durationMins * 60, 'low');

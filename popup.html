@@ -509,7 +509,7 @@
           <label for="duration">
             <span class="label-row">
               <span>Duration</span>
-              <span class="meta" id="durationMeta">Minutes</span>
+              <span class="meta" id="durationMeta">Recommended</span>
             </span>
             <input type="number" id="duration" value="5" min="1" max="10080" step="1" inputmode="numeric">
           </label>
@@ -518,7 +518,7 @@
             <button class="preset" type="button" data-duration="1440">1 day</button>
             <button class="preset" type="button" data-duration="10080">1 week</button>
           </div>
-          <span class="hint">Choose any session length from the draft minimum up to 1 week. Pause if you want to continue later.</span>
+          <span class="hint">Choose any session length from the draft minimum up to 1 week. WriterDrip shows a recommended duration when the draft needs more room for pacing and corrections.</span>
         </div>
 
         <div class="card">
@@ -579,12 +579,13 @@
           <div class="panel-header">
             <div class="label-row" style="margin-bottom:0;">
               <span>Recovery wizard</span>
-              <span class="panel-meta" id="recoveryMeta">Resume</span>
+              <span class="panel-meta" id="recoveryMeta">Checking</span>
             </div>
             <button class="panel-toggle" id="recoveryToggle" type="button" hidden>Show steps</button>
           </div>
           <p class="detail" id="recoverySummary"></p>
           <div class="panel-body" id="recoveryBody" hidden>
+            <div class="check-list" id="recoveryChecks"></div>
             <div class="step-list" id="recoverySteps"></div>
             <p class="detail" id="recoveryNote"></p>
           </div>
