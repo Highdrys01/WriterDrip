@@ -374,6 +374,66 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         }
     };
 
+    function lerp(start, end, amount) {
+        return start + ((end - start) * amount);
+    }
+
+    function interpolateIntensityValue(lowValue, mediumValue, highValue, blend) {
+        const clampedBlend = clamp(blend, 0, 1);
+        if (clampedBlend <= 0.5) {
+            return lerp(lowValue, mediumValue, clampedBlend / 0.5);
+        }
+        return lerp(mediumValue, highValue, (clampedBlend - 0.5) / 0.5);
+    }
+
+    function buildInterpolatedCorrectionProfile(blend) {
+        const clampedBlend = clamp(blend, 0, 1);
+        if (clampedBlend === 0) {
+            return { ...CORRECTION_MODIFIERS.low };
+        }
+        if (clampedBlend === 0.5) {
+            return { ...CORRECTION_MODIFIERS.medium };
+        }
+        if (clampedBlend === 1) {
+            return { ...CORRECTION_MODIFIERS.high };
+        }
+
+        const keys = Object.keys(CORRECTION_MODIFIERS.low);
+        const profile = {};
+        for (const key of keys) {
+            profile[key] = interpolateIntensityValue(
+                CORRECTION_MODIFIERS.low[key],
+                CORRECTION_MODIFIERS.medium[key],
+                CORRECTION_MODIFIERS.high[key],
+                clampedBlend
+            );
+        }
+        return profile;
+    }
+
+    function getCorrectionBlend(requestedIntensity, normalizedScore) {
+        if (requestedIntensity === 'low') {
+            return 0;
+        }
+        if (requestedIntensity === 'medium') {
+            return 0.5;
+        }
+        if (requestedIntensity === 'high') {
+            return 1;
+        }
+        return clamp(normalizedScore, 0, 1);
+    }
+
+    function getResolvedIntensityFromBlend(blend) {
+        if (blend < 0.34) {
+            return 'low';
+        }
+        if (blend < 0.68) {
+            return 'medium';
+        }
+        return 'high';
+    }
+
     let runner = createIdleRunner();
 
     const runtimeMessageListener = (message, sender, sendResponse) => {
@@ -1776,7 +1836,10 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
 
     function buildDraftMistakeProfile(chars, targetDurationSeconds, correctionIntensity = 'suggested') {
         const text = chars.join('');
-        const analysis = analyzeDraftText(text, targetDurationSeconds / 60);
+        const analysis = analyzeDraftText(text, {
+            durationMins: targetDurationSeconds / 60,
+            correctionIntensity
+        });
         const charCount = analysis.charCount;
         const wordCount = analysis.wordCount;
         const averageWordLength = analysis.averageWordLength;
@@ -1787,6 +1850,9 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         const symbolRatio = analysis.symbolRatio;
         const looksStructured = analysis.looksStructured;
         const suggestionScore = Number.isFinite(analysis.suggestedCorrectionScore) ? analysis.suggestedCorrectionScore : 1;
+        const normalizedSuggestedScore = Number.isFinite(analysis.suggestedCorrectionNormalizedScore)
+            ? analysis.suggestedCorrectionNormalizedScore
+            : clamp((suggestionScore + 1.1) / 4.6, 0, 1);
 
         const paceFactor = clamp(0.88 + (Math.min(secondsPerChar, 6) * 0.06), 0.88, 1.24);
         const technicalGuard = clamp(1 - Math.min((symbolRatio * 3.4) + (uppercaseRatio * 0.75), 0.4), 0.62, 1);
@@ -1794,11 +1860,16 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         const speedStress = clamp((1.45 - secondsPerChar) * 0.45, 0, 0.34);
         const requestedIntensity = normalizeCorrectionIntensity(correctionIntensity);
         const suggestedIntensity = analysis.suggestedCorrectionIntensity;
-        const resolvedIntensity = requestedIntensity === 'suggested' ? suggestedIntensity : requestedIntensity;
-        const intensityProfile = CORRECTION_MODIFIERS[resolvedIntensity] || CORRECTION_MODIFIERS.medium;
-        const intensityScoreCenter = resolvedIntensity === 'low' ? 0.1 : resolvedIntensity === 'medium' ? 1.45 : 2.75;
+        const intensityBlend = getCorrectionBlend(requestedIntensity, normalizedSuggestedScore);
+        const resolvedIntensity = requestedIntensity === 'suggested'
+            ? getResolvedIntensityFromBlend(intensityBlend)
+            : requestedIntensity;
+        const intensityProfile = requestedIntensity === 'suggested'
+            ? buildInterpolatedCorrectionProfile(intensityBlend)
+            : (CORRECTION_MODIFIERS[resolvedIntensity] || CORRECTION_MODIFIERS.medium);
+        const intensityScoreCenter = interpolateIntensityValue(0.1, 1.45, 2.75, intensityBlend);
         const suggestedStrengthBias = requestedIntensity === 'suggested'
-            ? clamp(1 + ((suggestionScore - intensityScoreCenter) * 0.1), 0.84, 1.22)
+            ? clamp(0.92 + (normalizedSuggestedScore * 0.38) + ((suggestionScore - intensityScoreCenter) * 0.04), 0.84, 1.28)
             : 1;
         const explicitSelectionBias = requestedIntensity === 'suggested'
             ? 1
@@ -1856,7 +1927,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             }
             maxMistakes = Math.min(maxMistakes, charCount >= 520 ? 2 : 1);
         }
-        maxMistakes = clamp(maxMistakes, 0, resolvedIntensity === 'high' ? 10 : resolvedIntensity === 'medium' ? 5 : 2);
+        maxMistakes = clamp(maxMistakes, 0, Math.round(interpolateIntensityValue(2, 5, 10, intensityBlend)));
 
         const baseMistakeChance = PROFILE.mistakeChance * paceFactor * technicalGuard * proseFactor * intensityProfile.chanceScale * combinedStrengthBias;
         const cooldownChars = Math.round(
@@ -1870,18 +1941,18 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             maxMistakes <= 1
                 ? 1
                 : Math.min(
-                    resolvedIntensity === 'high' ? 6 : 4,
-                    maxMistakes + (resolvedIntensity === 'high' ? 1 : 0) + (intensityProfile.segmentBias || 0)
+                    Math.round(interpolateIntensityValue(4, 4, 6, intensityBlend)),
+                    maxMistakes + (intensityBlend >= 0.72 ? 1 : 0) + (intensityProfile.segmentBias || 0)
                 ),
             1,
             6
         );
         const sentenceRepeatAllowance = clamp(
-            (resolvedIntensity === 'high' && charCount >= 900 ? 2 : 1) + (intensityProfile.sentenceAllowanceBonus || 0),
+            (intensityBlend >= 0.74 && charCount >= 900 ? 2 : 1) + (intensityProfile.sentenceAllowanceBonus || 0),
             1,
             4
         );
-        const baseSpacing = (resolvedIntensity === 'high' ? 42 : resolvedIntensity === 'low' ? 74 : 58) *
+        const baseSpacing = interpolateIntensityValue(74, 58, 42, intensityBlend) *
             technicalGuard *
             clamp(1.06 - ((paceFactor - 1) * 0.2), 0.88, 1.14) *
             (intensityProfile.spacingScale || 1) /
@@ -1892,14 +1963,17 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             wordCount >= (intensityProfile.variantMinWordCount || 26) &&
             charCount >= (intensityProfile.variantMinChars || 0);
         const baseWordVariantChance = canUseWordVariants
-            ? ((resolvedIntensity === 'high' ? 0.18 : resolvedIntensity === 'medium' ? 0.08 : 0.02) *
+            ? (interpolateIntensityValue(0.02, 0.08, 0.18, intensityBlend) *
                 (intensityProfile.wordVariantScale || 0) *
                 clamp(combinedStrengthBias, 0.8, 1.3))
             : 0;
         const baseMaxWordVariants = canUseWordVariants
-            ? (resolvedIntensity === 'high'
-                ? (charCount >= 1400 ? 2 : 1)
-                : (resolvedIntensity === 'medium' && charCount >= 1300 ? 1 : 0))
+            ? Math.round(interpolateIntensityValue(
+                0,
+                charCount >= 1300 ? 1 : 0,
+                charCount >= 1400 ? 2 : 1,
+                intensityBlend
+            ))
             : 0;
 
         return {
@@ -1913,6 +1987,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             requestedIntensity,
             suggestedIntensity,
             resolvedIntensity,
+            intensityBlend,
             suggestedStrengthBias,
             combinedStrengthBias,
             looksStructured,

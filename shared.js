@@ -188,6 +188,8 @@
             suggestedCorrectionReason: recommendation.reason,
             suggestedCorrectionSignals: recommendation.signals,
             suggestedCorrectionScore: recommendation.score,
+            suggestedCorrectionNormalizedScore: recommendation.normalizedScore,
+            suggestedCorrectionLabel: recommendation.label,
             requestedCorrectionIntensity: analyzeOptions.correctionIntensity,
             recommendedDurationIntensity: durationRecommendation.intensity,
             recommendedDurationMins: durationRecommendation.minutes,
@@ -305,10 +307,14 @@
         } else if (score <= 0.25) {
             intensity = 'low';
         }
+        const normalizedScore = normalizeSuggestedCorrectionScore(score, metrics);
+        const label = buildAdaptiveCorrectionLabel(normalizedScore, metrics);
 
         return {
             intensity,
             score,
+            normalizedScore,
+            label,
             signals: intensity === 'high'
                 ? positiveSignals.slice(0, 3)
                 : intensity === 'low'
@@ -446,37 +452,73 @@
         return Math.min(max, Math.max(min, value));
     }
 
+    function normalizeSuggestedCorrectionScore(score, metrics) {
+        let normalized = clamp((Number(score) + 1.1) / 4.6, 0, 1);
+        if (metrics?.looksStructured) {
+            normalized *= 0.82;
+        }
+        if ((metrics?.paragraphCount || 0) >= 3 && (metrics?.wordCount || 0) >= 120) {
+            normalized = Math.max(normalized, 0.56);
+        }
+        if ((metrics?.wordCount || 0) >= 220 && !metrics?.looksStructured) {
+            normalized = Math.max(normalized, 0.68);
+        }
+        return clamp(normalized, 0, 1);
+    }
+
+    function buildAdaptiveCorrectionLabel(normalizedScore, metrics) {
+        if (metrics?.looksStructured && normalizedScore < 0.32) {
+            return 'Careful';
+        }
+        if (normalizedScore < 0.16) {
+            return 'Minimal';
+        }
+        if (normalizedScore < 0.32) {
+            return 'Light';
+        }
+        if (normalizedScore < 0.5) {
+            return 'Balanced';
+        }
+        if (normalizedScore < 0.68) {
+            return 'Active';
+        }
+        if (normalizedScore < 0.84) {
+            return 'Dense';
+        }
+        return 'Intense';
+    }
+
     function buildCorrectionRecommendationReason(intensity, metrics, positiveSignals, cautionSignals) {
         if (intensity === 'low') {
             if (metrics.looksStructured || metrics.symbolRatio >= 0.014 || metrics.digitRatio >= 0.035 || metrics.uppercaseRatio >= 0.2) {
-                return 'Suggested stays low because this draft looks more structured or technical than plain prose.';
+                return 'Suggested stays careful because this draft looks more structured or technical than plain prose.';
             }
             if (metrics.charCount < 120 || metrics.wordCount < 22) {
-                return 'Suggested stays low because this draft is short and does not need many visible corrections.';
+                return 'Suggested stays light because this draft is short and does not need many visible corrections.';
             }
             if (metrics.secondsPerChar < 1.35) {
-                return 'Suggested stays low because the selected duration is tight for this amount of text.';
+                return 'Suggested stays light because the selected duration is tight for this amount of text.';
             }
-            return `Suggested stays low because ${pickSignal(cautionSignals, 'this draft benefits from lighter correction behavior').toLowerCase()}`;
+            return `Suggested stays light because ${pickSignal(cautionSignals, 'this draft benefits from lighter correction behavior').toLowerCase()}`;
         }
 
         if (intensity === 'high') {
             if (metrics.charCount >= 900 || metrics.wordCount >= 140) {
-                return 'Suggested leans high because this is a long prose draft with room for more recoverable correction sequences.';
+                return 'Suggested turns more active because this is a long prose draft with room for more recoverable correction sequences.';
             }
             if (metrics.secondsPerChar >= 5.5 && metrics.paragraphCount >= 2) {
-                return 'Suggested leans high because the draft has enough pacing headroom and paragraph structure to support stronger corrections cleanly.';
+                return 'Suggested turns more active because the draft has enough pacing headroom and paragraph structure to support stronger corrections cleanly.';
             }
-            return `Suggested leans high because ${pickSignal(positiveSignals, 'this draft has enough room for stronger correction spacing').toLowerCase()}`;
+            return `Suggested turns more active because ${pickSignal(positiveSignals, 'this draft has enough room for stronger correction spacing').toLowerCase()}`;
         }
 
         if (!cautionSignals.length) {
-            return 'Suggested stays medium because this draft reads like normal prose and has enough room for light corrections without overdoing them.';
+            return 'Suggested stays balanced because this draft reads like normal prose and has enough room for light corrections without overdoing them.';
         }
 
         const positive = pickSignal(positiveSignals, 'the draft reads like normal prose');
         const caution = pickSignal(cautionSignals, 'stronger corrections would be a little too noisy here');
-        return `Suggested stays medium because ${positive.toLowerCase()}, but ${caution.toLowerCase()}.`;
+        return `Suggested stays balanced because ${positive.toLowerCase()}, but ${caution.toLowerCase()}.`;
     }
 
     function pickSignal(signals, fallback) {

@@ -666,7 +666,7 @@ function syncButtons() {
         pauseBtn.innerText = 'Review before resume';
     }
     durationMeta.innerText = hasDraft
-        ? `${formatCorrectionIntensity(draftAnalysis.recommendedDurationIntensity || draftAnalysis.suggestedCorrectionIntensity)} rec. ${formatDurationShort(draftAnalysis.recommendedDurationMins || minimumDuration)}`
+        ? buildDurationMetaLabel(draftAnalysis, minimumDuration)
         : formatDurationShort(durationInput.value);
 }
 
@@ -1563,6 +1563,7 @@ function updateCorrectionUi() {
     const normalizedSelection = normalizeCorrectionIntensity(selectedCorrectionIntensity);
     const hasDraft = Boolean(draftAnalysis.trimmed);
     const suggestedIntensity = hasDraft ? draftAnalysis.suggestedCorrectionIntensity : 'medium';
+    const suggestedLabel = hasDraft ? (draftAnalysis.suggestedCorrectionLabel || formatCorrectionIntensity(suggestedIntensity)) : 'Balanced';
     const effectiveIntensity = normalizedSelection === 'suggested'
         ? suggestedIntensity
         : normalizedSelection;
@@ -1583,18 +1584,21 @@ function updateCorrectionUi() {
     }
 
     if (normalizedSelection === 'suggested') {
-        correctionMeta.innerText = `Suggested: ${formatCorrectionIntensity(effectiveIntensity)}`;
-        correctionHint.innerText = buildSuggestedCorrectionHint(draftAnalysis, effectiveIntensity);
+        correctionMeta.innerText = `Suggested: ${suggestedLabel}`;
+        correctionHint.innerText = buildSuggestedCorrectionHint(draftAnalysis, effectiveIntensity, suggestedLabel);
         return;
     }
 
     correctionMeta.innerText = `Using ${formatCorrectionIntensity(effectiveIntensity)}`;
-    correctionHint.innerText = `${buildCorrectionModeDescription(effectiveIntensity)} Suggested for this draft: ${formatCorrectionIntensity(suggestedIntensity)}. ${draftAnalysis.suggestedCorrectionReason || ''}`.trim();
+    correctionHint.innerText = `${buildCorrectionModeDescription(effectiveIntensity)} Suggested for this draft: ${suggestedLabel}. ${draftAnalysis.suggestedCorrectionReason || ''}`.trim();
 }
 
-function buildSuggestedCorrectionHint(draftAnalysis, intensity) {
+function buildSuggestedCorrectionHint(draftAnalysis, intensity, suggestedLabel) {
     if (draftAnalysis?.suggestedCorrectionReason) {
-        return draftAnalysis.suggestedCorrectionReason;
+        const score = Number.isFinite(draftAnalysis?.suggestedCorrectionNormalizedScore)
+            ? `${Math.round(draftAnalysis.suggestedCorrectionNormalizedScore * 100)} / 100`
+            : null;
+        return `${draftAnalysis.suggestedCorrectionReason}${score ? ` Current adaptive profile: ${suggestedLabel} (${score}).` : ''}`;
     }
 
     if (intensity === 'low') {
@@ -1618,8 +1622,23 @@ function buildCorrectionModeDescription(intensity) {
 
 function formatRecommendedDuration(draftAnalysis) {
     const minutes = draftAnalysis?.recommendedDurationMins || draftAnalysis?.minimumDurationMins || 0;
+    const requestedIntensity = normalizeCorrectionIntensity(draftAnalysis?.requestedCorrectionIntensity);
+    if (requestedIntensity === 'suggested') {
+        return `${formatDuration(minutes)} for ${draftAnalysis?.suggestedCorrectionLabel || 'Adaptive'}`;
+    }
+
     const intensity = draftAnalysis?.recommendedDurationIntensity || draftAnalysis?.suggestedCorrectionIntensity || 'medium';
     return `${formatDuration(minutes)} for ${formatCorrectionIntensity(intensity)}`;
+}
+
+function buildDurationMetaLabel(draftAnalysis, minimumDuration) {
+    const recommended = draftAnalysis?.recommendedDurationMins || minimumDuration;
+    const requestedIntensity = normalizeCorrectionIntensity(draftAnalysis?.requestedCorrectionIntensity);
+    if (requestedIntensity === 'suggested') {
+        return `${draftAnalysis?.suggestedCorrectionLabel || 'Adaptive'} rec. ${formatDurationShort(recommended)}`;
+    }
+
+    return `${formatCorrectionIntensity(draftAnalysis?.recommendedDurationIntensity || draftAnalysis?.suggestedCorrectionIntensity)} rec. ${formatDurationShort(recommended)}`;
 }
 
 function formatCorrectionIntensity(value) {

@@ -451,6 +451,8 @@ async function validatePlanner() {
     assert.equal(shortDraftAnalysis.suggestedCorrectionIntensity, 'low', 'Very short drafts should stay on low suggestion.');
     assert.match(shortDraftAnalysis.suggestedCorrectionReason, /short/i, 'Short drafts should explain that they are too short for stronger correction behavior.');
     assert.ok(shortDraftAnalysis.recommendedDurationMins >= shortDraftAnalysis.minimumDurationMins, 'Recommended duration should never fall below the minimum duration.');
+    assert.ok(shortDraftAnalysis.suggestedCorrectionNormalizedScore >= 0 && shortDraftAnalysis.suggestedCorrectionNormalizedScore <= 1, 'Suggested correction scores should be normalized to a 0-1 range.');
+    assert.ok(!/^(low|medium|high)$/i.test(shortDraftAnalysis.suggestedCorrectionLabel), 'Suggested correction labels should use adaptive wording instead of the manual presets.');
     assert.equal(shared.normalizeDurationMins('2.2', 1), 3, 'Duration normalization should round partial minutes up.');
     assert.equal(shared.normalizeDurationMins('0.2', 5), 5, 'Duration normalization should respect the current draft minimum.');
     assert.equal(shared.normalizeDurationMins('abc', 5), null, 'Duration normalization should reject invalid numeric input.');
@@ -460,6 +462,7 @@ async function validatePlanner() {
         60
     );
     assert.equal(balancedDraftAnalysis.suggestedCorrectionIntensity, 'medium', 'Balanced prose should land on medium suggestion.');
+    assert.ok(balancedDraftAnalysis.suggestedCorrectionNormalizedScore > shortDraftAnalysis.suggestedCorrectionNormalizedScore, 'Balanced prose should score higher on the adaptive suggested scale than a short note.');
     const balancedLowDuration = shared.analyzeDraftText(
         'This draft is long enough to feel like normal prose, but it is not massive. It has a few sentences, some commas, and a steady rhythm throughout the paragraph.',
         { durationMins: 60, correctionIntensity: 'low' }
@@ -478,6 +481,7 @@ async function validatePlanner() {
     const longDraftAnalysis = shared.analyzeDraftText(scenarios[1].text, scenarios[1].durationMins);
     assert.equal(longDraftAnalysis.suggestedCorrectionIntensity, 'high', 'Long relaxed prose should suggest high correction intensity.');
     assert.ok(longDraftAnalysis.suggestedCorrectionSignals.length > 0, 'Suggested intensity should include explanation signals for longer prose.');
+    assert.ok(longDraftAnalysis.suggestedCorrectionNormalizedScore > balancedDraftAnalysis.suggestedCorrectionNormalizedScore, 'Long relaxed prose should score higher on the adaptive suggested scale than balanced prose.');
     assert.ok(longDraftAnalysis.recommendedDurationMins > longDraftAnalysis.minimumDurationMins, 'Long prose should recommend more time than the hard minimum.');
     assert.match(longDraftAnalysis.recommendedDurationReason, /recommended|room|pacing|corrections/i, 'Recommended duration should explain why extra headroom helps the draft.');
     const longLowDuration = shared.analyzeDraftText(scenarios[1].text, { durationMins: scenarios[1].durationMins, correctionIntensity: 'low' });
