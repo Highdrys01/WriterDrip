@@ -149,6 +149,7 @@
             ? analyzeOptions.durationMins
             : minimumDurationMins;
         const secondsPerChar = (safeDurationMins * 60) / Math.max(1, charCount);
+        const effectiveWpm = wordCount / Math.max(safeDurationMins, 1 / 60);
 
         const analysis = {
             sanitized,
@@ -176,7 +177,8 @@
             looksStructured,
             minimumDurationMins,
             safeDurationMins,
-            secondsPerChar
+            secondsPerChar,
+            effectiveWpm
         };
 
         const recommendation = buildCorrectionRecommendation(analysis);
@@ -269,14 +271,33 @@
             reward(0.18, 'The draft has enough longer words to support occasional recoverable corrections.');
         }
 
-        if (metrics.secondsPerChar >= 3.2) {
-            reward(0.8, 'The selected duration leaves enough pacing headroom for clean recoveries.');
+        const relaxedPacingScore = clamp((24 - metrics.effectiveWpm) / 10, 0, 1.35);
+        const veryRelaxedPacingScore = clamp((16 - metrics.effectiveWpm) / 6, 0, 1.2);
+        const tightPacingScore = clamp((metrics.effectiveWpm - 24) / 12, 0, 1.5);
+        const veryTightPacingScore = clamp((metrics.effectiveWpm - 34) / 10, 0, 1.5);
+        if (relaxedPacingScore > 0) {
+            reward(
+                0.72 * relaxedPacingScore,
+                'The selected duration leaves enough pacing headroom for clean recoveries.'
+            );
         }
-        if (metrics.secondsPerChar >= 5.5) {
-            reward(0.45, 'The session is relaxed enough to support stronger correction spacing.');
+        if (veryRelaxedPacingScore > 0) {
+            reward(
+                0.46 * veryRelaxedPacingScore,
+                'The session is relaxed enough to support stronger correction spacing.'
+            );
         }
-        if (metrics.secondsPerChar < 1.35) {
-            caution(0.95, 'The selected duration is tight for the amount of text.');
+        if (tightPacingScore > 0) {
+            caution(
+                1.12 * tightPacingScore,
+                'The selected duration is tight for the amount of text.'
+            );
+        }
+        if (veryTightPacingScore > 0) {
+            caution(
+                0.78 * veryTightPacingScore,
+                'The draft would need to move very quickly at this duration.'
+            );
         }
 
         if (metrics.punctuationRatio >= 0.028 && metrics.punctuationRatio <= 0.075) {
@@ -540,7 +561,7 @@
             .split(/(?<=[.!?])\s+|\n+/)
             .map((chunk) => chunk.trim())
             .filter(Boolean)
-            .map((chunk) => (chunk.match(/[A-Za-z]+/g) || []).length)
+            .map((chunk) => (chunk.match(WORD_REGEX) || []).length)
             .filter((count) => count > 0);
     }
 

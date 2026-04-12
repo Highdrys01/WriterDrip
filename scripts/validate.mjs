@@ -488,6 +488,8 @@ async function validatePlanner() {
     assert.ok(longDraftAnalysis.suggestedCorrectionNormalizedScore > balancedDraftAnalysis.suggestedCorrectionNormalizedScore, 'Long relaxed prose should score higher on the adaptive suggested scale than balanced prose.');
     assert.ok(longDraftAnalysis.recommendedDurationMins > longDraftAnalysis.minimumDurationMins, 'Long prose should recommend more time than the hard minimum.');
     assert.match(longDraftAnalysis.recommendedDurationReason, /recommended|room|pacing|corrections/i, 'Recommended duration should explain why extra headroom helps the draft.');
+    const longTightSuggested = shared.analyzeDraftText(scenarios[1].text, { durationMins: 5, correctionIntensity: 'suggested' });
+    assert.ok(longTightSuggested.suggestedCorrectionNormalizedScore < longDraftAnalysis.suggestedCorrectionNormalizedScore, 'The same long draft should get a lighter adaptive suggested score when the chosen duration is much tighter.');
     const longLowDuration = shared.analyzeDraftText(scenarios[1].text, { durationMins: scenarios[1].durationMins, correctionIntensity: 'low' });
     const longMediumDuration = shared.analyzeDraftText(scenarios[1].text, { durationMins: scenarios[1].durationMins, correctionIntensity: 'medium' });
     const longHighDuration = shared.analyzeDraftText(scenarios[1].text, { durationMins: scenarios[1].durationMins, correctionIntensity: 'high' });
