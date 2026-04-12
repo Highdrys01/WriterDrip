@@ -476,6 +476,7 @@ async function validatePlanner() {
     assert.ok(mediumProfile.maxMistakes < highProfile.maxMistakes, 'High intensity should budget more mistakes than medium on long prose.');
     assert.ok(lowProfile.cooldownChars > mediumProfile.cooldownChars, 'Low intensity should space mistakes farther apart than medium.');
     assert.ok(mediumProfile.cooldownChars > highProfile.cooldownChars, 'High intensity should allow tighter spacing than medium.');
+    assert.ok(highProfile.minMistakeSpacingChars <= Math.round(mediumProfile.minMistakeSpacingChars * 0.45), 'High intensity should allow much tighter mistake spacing than medium.');
     assert.equal(lowProfile.wordVariantChance, 0, 'Low intensity should disable larger word-level variants.');
     assert.ok(highProfile.wordVariantChance > mediumProfile.wordVariantChance, 'High intensity should allow stronger word-level variant behavior than medium.');
     assert.ok(highProfile.vowelSlipChance > mediumProfile.vowelSlipChance, 'High intensity should allow more vowel-drift mistakes than medium.');
@@ -532,6 +533,27 @@ async function validatePlanner() {
     assert.ok(intensityAverages.medium.repairs < intensityAverages.high.repairs, 'High intensity should schedule more repair sequences than medium.');
     assert.ok(intensityAverages.low.backspaces < intensityAverages.medium.backspaces, 'Low intensity should create shallower repairs than medium.');
     assert.ok(intensityAverages.medium.backspaces < intensityAverages.high.backspaces, 'High intensity should create deeper repairs than medium.');
+    assert.ok(intensityAverages.medium.repairs >= Math.max(30, intensityAverages.low.repairs * 2), 'Medium intensity should feel noticeably more active than low on long prose.');
+    assert.ok(intensityAverages.high.repairs >= intensityAverages.medium.repairs * 1.2, 'High intensity should schedule materially more repair sequences than medium on long prose.');
+    assert.ok(intensityAverages.high.backspaces >= intensityAverages.medium.backspaces * 1.3, 'High intensity should create materially deeper repairs than medium on long prose.');
+
+    const shortContrastText = 'This is a shorter draft with a couple of sentences, a comma, and enough plain prose to see whether correction modes feel clearly different when the sample is not especially long.';
+    const shortContrastAverages = {
+        low: { repairs: 0, backspaces: 0 },
+        medium: { repairs: 0, backspaces: 0 },
+        high: { repairs: 0, backspaces: 0 }
+    };
+    for (let seed = 1; seed <= 60; seed += 1) {
+        for (const intensity of ['low', 'medium', 'high']) {
+            const actions = hooks.buildActionPlan(shortContrastText, 90 * 60, seed, intensity);
+            shortContrastAverages[intensity].repairs += actions.filter((action) => action?.kind === 'repair-pause').length;
+            shortContrastAverages[intensity].backspaces += actions.filter((action) => action?.kind === 'repair-backspace').length;
+        }
+    }
+
+    assert.ok(shortContrastAverages.medium.repairs > shortContrastAverages.low.repairs, 'Medium intensity should still produce more correction activity than low on shorter prose.');
+    assert.ok(shortContrastAverages.high.repairs >= shortContrastAverages.medium.repairs * 1.6, 'High intensity should stand apart clearly from medium even on shorter prose.');
+    assert.ok(shortContrastAverages.high.backspaces >= shortContrastAverages.medium.backspaces * 1.8, 'High intensity should backtrack much more than medium on shorter prose.');
     const variantHeavyText = `${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText}`;
     const variantAverages = {
         low: 0,

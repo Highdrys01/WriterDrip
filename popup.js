@@ -1608,12 +1608,12 @@ function buildSuggestedCorrectionHint(draftAnalysis, intensity) {
 
 function buildCorrectionModeDescription(intensity) {
     if (intensity === 'low') {
-        return 'Low keeps corrections rare, quick, and mostly surface-level.';
+        return 'Low keeps corrections rare, fast to repair, and mostly surface-level.';
     }
     if (intensity === 'high') {
-        return 'High allows more correction sequences, deeper repairs, and occasional larger word-level swaps when the draft supports them.';
+        return 'High allows more frequent correction sequences, deeper backtracking, and stronger wording or punctuation slips when the draft can support them.';
     }
-    return 'Medium keeps corrections noticeable but still evenly spaced and controlled.';
+    return 'Medium keeps corrections noticeable, balanced, and more varied without pushing into the heaviest repair behavior.';
 }
 
 function formatCorrectionIntensity(value) {

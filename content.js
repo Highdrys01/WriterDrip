@@ -259,118 +259,118 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
     }
     const CORRECTION_MODIFIERS = {
         low: {
-            chanceScale: 0.42,
-            budgetScale: 0.54,
-            budgetOffset: -0.15,
-            cooldownScale: 1.34,
+            chanceScale: 0.24,
+            budgetScale: 0.34,
+            budgetOffset: -0.45,
+            cooldownScale: 1.72,
             immediateRepairOffset: 0.11,
             wordBoundaryOffset: 0.1,
-            repairDepthScale: 0.78,
-            noticePauseScale: 0.92,
-            realignPauseScale: 0.92,
-            transpositionScale: 0.76,
-            doubleTapScale: 0.74,
-            casingScale: 0.72,
-            omissionScale: 0.64,
-            spacingOmissionScale: 0.2,
-            doubleSpaceScale: 0.16,
-            punctuationOmissionScale: 0.18,
-            punctuationSpacingScale: 0.14,
-            punctuationSubstitutionScale: 0.08,
+            repairDepthScale: 0.68,
+            noticePauseScale: 0.88,
+            realignPauseScale: 0.88,
+            transpositionScale: 0.68,
+            doubleTapScale: 0.64,
+            casingScale: 0.66,
+            omissionScale: 0.56,
+            spacingOmissionScale: 0.1,
+            doubleSpaceScale: 0.08,
+            punctuationOmissionScale: 0.1,
+            punctuationSpacingScale: 0.08,
+            punctuationSubstitutionScale: 0.04,
             multiPunctuationScale: 0,
             repeatWordScale: 0,
             smallWordSkipScale: 0,
-            spacingScale: 1.24,
+            spacingScale: 1.34,
             segmentBias: -1,
             sentenceAllowanceBonus: 0,
             wordVariantScale: 0,
             maxWordVariantScale: 0,
             variantMinWordCount: 999,
             variantMinChars: 99999,
-            keyboardSlipScale: 0.82,
-            vowelSlipScale: 0.44,
-            softSlipScale: 0.22,
-            guaranteedMinChars: 420,
-            repairMessinessScale: 0.28,
-            repairAfterExtraScale: 0.68,
-            repairHardExtraScale: 0.72,
+            keyboardSlipScale: 0.72,
+            vowelSlipScale: 0.32,
+            softSlipScale: 0.16,
+            guaranteedMinChars: 560,
+            repairMessinessScale: 0.14,
+            repairAfterExtraScale: 0.56,
+            repairHardExtraScale: 0.64,
             wordVariantDelayScale: 0.78
         },
         medium: {
-            chanceScale: 1,
-            budgetScale: 1,
+            chanceScale: 0.9,
+            budgetScale: 0.92,
             budgetOffset: 0,
-            cooldownScale: 1,
+            cooldownScale: 1.04,
             immediateRepairOffset: 0.01,
             wordBoundaryOffset: 0.02,
-            repairDepthScale: 0.98,
+            repairDepthScale: 0.94,
             noticePauseScale: 1,
             realignPauseScale: 1,
-            transpositionScale: 1,
-            doubleTapScale: 1,
-            casingScale: 1,
-            omissionScale: 1,
-            spacingOmissionScale: 0.72,
-            doubleSpaceScale: 0.62,
-            punctuationOmissionScale: 0.76,
-            punctuationSpacingScale: 0.58,
-            punctuationSubstitutionScale: 0.52,
-            multiPunctuationScale: 0.3,
-            repeatWordScale: 0.42,
-            smallWordSkipScale: 0.34,
-            spacingScale: 1,
+            transpositionScale: 0.96,
+            doubleTapScale: 0.94,
+            casingScale: 0.96,
+            omissionScale: 0.94,
+            spacingOmissionScale: 0.62,
+            doubleSpaceScale: 0.54,
+            punctuationOmissionScale: 0.68,
+            punctuationSpacingScale: 0.5,
+            punctuationSubstitutionScale: 0.44,
+            multiPunctuationScale: 0.24,
+            repeatWordScale: 0.34,
+            smallWordSkipScale: 0.26,
+            spacingScale: 1.06,
             segmentBias: 0,
             sentenceAllowanceBonus: 0,
-            wordVariantScale: 0.55,
+            wordVariantScale: 0.48,
             maxWordVariantScale: 1,
             variantMinWordCount: 70,
             variantMinChars: 1100,
-            keyboardSlipScale: 1,
-            vowelSlipScale: 0.92,
-            softSlipScale: 0.55,
+            keyboardSlipScale: 0.94,
+            vowelSlipScale: 0.82,
+            softSlipScale: 0.48,
             guaranteedMinChars: 180,
-            repairMessinessScale: 0.72,
-            repairAfterExtraScale: 1,
-            repairHardExtraScale: 1,
-            wordVariantDelayScale: 1
+            repairMessinessScale: 0.62,
+            repairAfterExtraScale: 0.94,
+            repairHardExtraScale: 0.96,
+            wordVariantDelayScale: 1.02
         },
         high: {
-            chanceScale: 1.92,
-            budgetScale: 1.68,
-            budgetOffset: 0.85,
-            cooldownScale: 0.7,
-            immediateRepairOffset: -0.09,
-            wordBoundaryOffset: -0.08,
-            repairDepthScale: 1.34,
-            noticePauseScale: 1.18,
-            realignPauseScale: 1.12,
-            transpositionScale: 1.22,
-            doubleTapScale: 1.18,
-            casingScale: 1.18,
-            omissionScale: 1.28,
-            spacingOmissionScale: 1.18,
-            doubleSpaceScale: 1.16,
-            punctuationOmissionScale: 1.22,
-            punctuationSpacingScale: 1.08,
-            punctuationSubstitutionScale: 1.18,
-            multiPunctuationScale: 1.06,
-            repeatWordScale: 1.08,
-            smallWordSkipScale: 0.92,
-            spacingScale: 0.76,
-            segmentBias: 1,
-            sentenceAllowanceBonus: 1,
-            wordVariantScale: 1.4,
-            maxWordVariantScale: 1.8,
-            variantMinWordCount: 24,
-            variantMinChars: 260,
-            keyboardSlipScale: 1.14,
-            vowelSlipScale: 1.42,
-            softSlipScale: 1.05,
+            chanceScale: 2.85,
+            budgetScale: 2.2,
+            budgetOffset: 1.4,
+            cooldownScale: 0.42,
+            immediateRepairOffset: -0.15,
+            wordBoundaryOffset: -0.12,
+            repairDepthScale: 1.6,
+            noticePauseScale: 1.24,
+            realignPauseScale: 1.16,
+            transpositionScale: 1.36,
+            doubleTapScale: 1.3,
+            casingScale: 1.28,
+            omissionScale: 1.42,
+            spacingOmissionScale: 1.42,
+            doubleSpaceScale: 1.34,
+            punctuationOmissionScale: 1.42,
+            punctuationSpacingScale: 1.26,
+            punctuationSubstitutionScale: 1.42,
+            multiPunctuationScale: 1.34,
+            repeatWordScale: 1.36,
+            smallWordSkipScale: 1.14,
+            spacingScale: 0.62,
+            segmentBias: 2,
+            sentenceAllowanceBonus: 2,
+            wordVariantScale: 1.85,
+            maxWordVariantScale: 2.4,
+            variantMinWordCount: 18,
+            variantMinChars: 180,
+            keyboardSlipScale: 1.26,
+            vowelSlipScale: 1.7,
+            softSlipScale: 1.18,
             guaranteedMinChars: 95,
-            repairMessinessScale: 1.26,
-            repairAfterExtraScale: 1.32,
-            repairHardExtraScale: 1.38,
-            wordVariantDelayScale: 1.26
+            repairMessinessScale: 1.78,
+            repairAfterExtraScale: 1.62,
+            repairHardExtraScale: 1.72,
+            wordVariantDelayScale: 1.48
         }
     };
 
@@ -1800,6 +1800,14 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         const suggestedStrengthBias = requestedIntensity === 'suggested'
             ? clamp(1 + ((suggestionScore - intensityScoreCenter) * 0.1), 0.84, 1.22)
             : 1;
+        const explicitSelectionBias = requestedIntensity === 'suggested'
+            ? 1
+            : requestedIntensity === 'high'
+                ? 1.22
+                : requestedIntensity === 'low'
+                    ? 0.82
+                    : 1.04;
+        const combinedStrengthBias = clamp(suggestedStrengthBias * explicitSelectionBias, 0.72, 1.5);
 
         let maxMistakes = 0;
         if (charCount >= 90 && wordCount >= 18) {
@@ -1821,43 +1829,63 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             }
         }
 
-        maxMistakes = Math.round((maxMistakes * intensityProfile.budgetScale * suggestedStrengthBias) + intensityProfile.budgetOffset);
+        maxMistakes = Math.round((maxMistakes * intensityProfile.budgetScale * combinedStrengthBias) + intensityProfile.budgetOffset);
         if (looksStructured) {
             maxMistakes = Math.min(maxMistakes, 1);
         }
-        if (resolvedIntensity === 'high' && charCount >= 220 && wordCount >= 34) {
+        if (resolvedIntensity === 'medium' && charCount >= 260 && wordCount >= 42) {
             maxMistakes = Math.max(maxMistakes, 2);
         }
-        maxMistakes = clamp(maxMistakes, 0, resolvedIntensity === 'high' ? 6 : 5);
+        if (resolvedIntensity === 'high' && charCount >= 220 && wordCount >= 34) {
+            maxMistakes = Math.max(maxMistakes, 3);
+        }
+        if (requestedIntensity === 'high' && !looksStructured) {
+            if (charCount >= 180 && wordCount >= 28) {
+                maxMistakes = Math.max(maxMistakes, 4);
+            }
+            if (charCount >= 520 && wordCount >= 85) {
+                maxMistakes = Math.max(maxMistakes, 6);
+            }
+            if (charCount >= 1200 && wordCount >= 190) {
+                maxMistakes = Math.max(maxMistakes, 8);
+            }
+        }
+        if (requestedIntensity === 'low') {
+            if (!looksStructured && charCount >= 320 && wordCount >= 50) {
+                maxMistakes = Math.max(maxMistakes, 1);
+            }
+            maxMistakes = Math.min(maxMistakes, charCount >= 520 ? 2 : 1);
+        }
+        maxMistakes = clamp(maxMistakes, 0, resolvedIntensity === 'high' ? 10 : resolvedIntensity === 'medium' ? 5 : 2);
 
-        const baseMistakeChance = PROFILE.mistakeChance * paceFactor * technicalGuard * proseFactor * intensityProfile.chanceScale * suggestedStrengthBias;
+        const baseMistakeChance = PROFILE.mistakeChance * paceFactor * technicalGuard * proseFactor * intensityProfile.chanceScale * combinedStrengthBias;
         const cooldownChars = Math.round(
             PROFILE.cooldownChars *
             clamp(1.08 - ((paceFactor - 1) * 0.35) + ((technicalGuard - 0.8) * 0.2), 0.68, 1.18) *
             intensityProfile.cooldownScale /
-            clamp(suggestedStrengthBias, 0.82, 1.2)
+            clamp(combinedStrengthBias, 0.8, 1.28)
         );
 
         const segmentCount = clamp(
             maxMistakes <= 1
                 ? 1
                 : Math.min(
-                    resolvedIntensity === 'high' ? 5 : 4,
+                    resolvedIntensity === 'high' ? 6 : 4,
                     maxMistakes + (resolvedIntensity === 'high' ? 1 : 0) + (intensityProfile.segmentBias || 0)
                 ),
             1,
-            5
+            6
         );
         const sentenceRepeatAllowance = clamp(
             (resolvedIntensity === 'high' && charCount >= 900 ? 2 : 1) + (intensityProfile.sentenceAllowanceBonus || 0),
             1,
-            3
+            4
         );
         const baseSpacing = (resolvedIntensity === 'high' ? 42 : resolvedIntensity === 'low' ? 74 : 58) *
             technicalGuard *
             clamp(1.06 - ((paceFactor - 1) * 0.2), 0.88, 1.14) *
             (intensityProfile.spacingScale || 1) /
-            clamp(suggestedStrengthBias, 0.84, 1.18);
+            clamp(combinedStrengthBias, 0.78, 1.26);
         const canUseWordVariants = !looksStructured &&
             technicalGuard > 0.82 &&
             averageWordLength > 4.1 &&
@@ -1866,7 +1894,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         const baseWordVariantChance = canUseWordVariants
             ? ((resolvedIntensity === 'high' ? 0.18 : resolvedIntensity === 'medium' ? 0.08 : 0.02) *
                 (intensityProfile.wordVariantScale || 0) *
-                clamp(suggestedStrengthBias, 0.84, 1.22))
+                clamp(combinedStrengthBias, 0.8, 1.3))
             : 0;
         const baseMaxWordVariants = canUseWordVariants
             ? (resolvedIntensity === 'high'
@@ -1886,6 +1914,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             suggestedIntensity,
             resolvedIntensity,
             suggestedStrengthBias,
+            combinedStrengthBias,
             looksStructured,
             baseMistakeChance,
             cooldownChars,
