@@ -460,12 +460,33 @@ async function validatePlanner() {
         60
     );
     assert.equal(balancedDraftAnalysis.suggestedCorrectionIntensity, 'medium', 'Balanced prose should land on medium suggestion.');
+    const balancedLowDuration = shared.analyzeDraftText(
+        'This draft is long enough to feel like normal prose, but it is not massive. It has a few sentences, some commas, and a steady rhythm throughout the paragraph.',
+        { durationMins: 60, correctionIntensity: 'low' }
+    );
+    const balancedMediumDuration = shared.analyzeDraftText(
+        'This draft is long enough to feel like normal prose, but it is not massive. It has a few sentences, some commas, and a steady rhythm throughout the paragraph.',
+        { durationMins: 60, correctionIntensity: 'medium' }
+    );
+    const balancedHighDuration = shared.analyzeDraftText(
+        'This draft is long enough to feel like normal prose, but it is not massive. It has a few sentences, some commas, and a steady rhythm throughout the paragraph.',
+        { durationMins: 60, correctionIntensity: 'high' }
+    );
+    assert.ok(balancedLowDuration.recommendedDurationMins < balancedMediumDuration.recommendedDurationMins, 'Balanced prose should recommend more time for medium than low correction intensity.');
+    assert.ok(balancedMediumDuration.recommendedDurationMins < balancedHighDuration.recommendedDurationMins, 'Balanced prose should recommend more time for high than medium correction intensity.');
 
     const longDraftAnalysis = shared.analyzeDraftText(scenarios[1].text, scenarios[1].durationMins);
     assert.equal(longDraftAnalysis.suggestedCorrectionIntensity, 'high', 'Long relaxed prose should suggest high correction intensity.');
     assert.ok(longDraftAnalysis.suggestedCorrectionSignals.length > 0, 'Suggested intensity should include explanation signals for longer prose.');
     assert.ok(longDraftAnalysis.recommendedDurationMins > longDraftAnalysis.minimumDurationMins, 'Long prose should recommend more time than the hard minimum.');
     assert.match(longDraftAnalysis.recommendedDurationReason, /recommended|room|pacing|corrections/i, 'Recommended duration should explain why extra headroom helps the draft.');
+    const longLowDuration = shared.analyzeDraftText(scenarios[1].text, { durationMins: scenarios[1].durationMins, correctionIntensity: 'low' });
+    const longMediumDuration = shared.analyzeDraftText(scenarios[1].text, { durationMins: scenarios[1].durationMins, correctionIntensity: 'medium' });
+    const longHighDuration = shared.analyzeDraftText(scenarios[1].text, { durationMins: scenarios[1].durationMins, correctionIntensity: 'high' });
+    assert.equal(longHighDuration.recommendedDurationIntensity, 'high', 'The duration recommendation should reflect the selected correction intensity.');
+    assert.ok(longLowDuration.recommendedDurationMins < longMediumDuration.recommendedDurationMins, 'Long prose should recommend more time for medium than low correction intensity.');
+    assert.ok(longMediumDuration.recommendedDurationMins < longHighDuration.recommendedDurationMins, 'Long prose should recommend more time for high than medium correction intensity.');
+    assert.ok(longHighDuration.recommendedDurationMins > shortDraftAnalysis.recommendedDurationMins, 'Long prose should recommend more time than a short note.');
 
     const longChars = Array.from(scenarios[1].text);
     const lowProfile = hooks.buildDraftMistakeProfile(longChars, scenarios[1].durationMins * 60, 'low');

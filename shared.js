@@ -79,7 +79,22 @@
         return Math.min(MAX_DURATION_MINS, Math.max(Math.max(MIN_DURATION_MINS, minimumDurationMins || MIN_DURATION_MINS), rounded));
     }
 
-    function analyzeDraftText(text, durationMins = null) {
+    function resolveAnalyzeOptions(durationOrOptions = null, maybeOptions = null) {
+        if (durationOrOptions && typeof durationOrOptions === 'object' && !Array.isArray(durationOrOptions)) {
+            return {
+                durationMins: Number(durationOrOptions.durationMins),
+                correctionIntensity: normalizeCorrectionIntensity(durationOrOptions.correctionIntensity)
+            };
+        }
+
+        return {
+            durationMins: Number(durationOrOptions),
+            correctionIntensity: normalizeCorrectionIntensity(maybeOptions?.correctionIntensity)
+        };
+    }
+
+    function analyzeDraftText(text, durationOrOptions = null, maybeOptions = null) {
+        const analyzeOptions = resolveAnalyzeOptions(durationOrOptions, maybeOptions);
         const sanitized = sanitizeDraftText(text);
         const trimmed = sanitized.trim();
         const words = sanitized.match(/[A-Za-z]+/g) || [];
@@ -126,7 +141,9 @@
             bulletLineRatio > 0.35 ||
             digitRatio > 0.06;
         const minimumDurationMins = getMinimumDurationMins(trimmed);
-        const safeDurationMins = Number.isFinite(durationMins) && durationMins > 0 ? durationMins : minimumDurationMins;
+        const safeDurationMins = Number.isFinite(analyzeOptions.durationMins) && analyzeOptions.durationMins > 0
+            ? analyzeOptions.durationMins
+            : minimumDurationMins;
         const secondsPerChar = (safeDurationMins * 60) / Math.max(1, charCount);
 
         const analysis = {
@@ -159,7 +176,11 @@
         };
 
         const recommendation = buildCorrectionRecommendation(analysis);
-        const durationRecommendation = buildDurationRecommendation(analysis, recommendation);
+        const durationRecommendation = buildDurationRecommendation(
+            analysis,
+            recommendation,
+            analyzeOptions.correctionIntensity
+        );
 
         return {
             ...analysis,
@@ -167,6 +188,8 @@
             suggestedCorrectionReason: recommendation.reason,
             suggestedCorrectionSignals: recommendation.signals,
             suggestedCorrectionScore: recommendation.score,
+            requestedCorrectionIntensity: analyzeOptions.correctionIntensity,
+            recommendedDurationIntensity: durationRecommendation.intensity,
             recommendedDurationMins: durationRecommendation.minutes,
             recommendedDurationReason: durationRecommendation.reason
         };
@@ -295,111 +318,128 @@
         };
     }
 
-    function buildDurationRecommendation(metrics, correctionRecommendation = null) {
+    function buildDurationRecommendation(metrics, correctionRecommendation = null, correctionIntensity = 'suggested') {
         const minimum = Math.max(MIN_DURATION_MINS, Number(metrics?.minimumDurationMins) || MIN_DURATION_MINS);
         if (!metrics?.trimmed) {
             return {
+                intensity: 'medium',
                 minutes: minimum,
                 reason: 'Recommended duration will appear once there is enough draft text to analyze.'
             };
         }
 
-        let multiplier = 1.18;
-        let additiveMins = 0;
+        const requestedIntensity = normalizeCorrectionIntensity(correctionIntensity);
+        const effectiveIntensity = requestedIntensity === 'suggested'
+            ? (correctionRecommendation?.intensity || 'medium')
+            : requestedIntensity;
+        const punctuationCount = Math.round(metrics.punctuationRatio * metrics.charCount);
+        const wordsPerParagraph = metrics.paragraphCount
+            ? metrics.wordCount / Math.max(1, metrics.paragraphCount)
+            : metrics.wordCount;
+        const paragraphDensity = clamp((wordsPerParagraph - 55) / 70, 0, 1.45);
+        const sentenceDensity = clamp((metrics.averageSentenceWordCount - 11) / 9, 0, 1.5);
+        const longDraftLoad = clamp((metrics.wordCount - 80) / 180, 0, 1.7);
+        const proseBias = metrics.looksStructured ? 0.86 : 1;
+        const targetWordsPerMinute = effectiveIntensity === 'high'
+            ? 36
+            : effectiveIntensity === 'medium'
+                ? 44
+                : 53;
+        const baseTypingMins = (metrics.wordCount / Math.max(1, targetWordsPerMinute)) * proseBias;
+        const paragraphMins = metrics.paragraphCount <= 1
+            ? 0
+            : (metrics.paragraphCount - 1) * (effectiveIntensity === 'high' ? 1.2 : effectiveIntensity === 'medium' ? 0.9 : 0.55);
+        const denseParagraphMins = paragraphDensity * (effectiveIntensity === 'high' ? 3.1 : effectiveIntensity === 'medium' ? 2.05 : 1.1);
+        const sentenceMins = Math.max(0, metrics.sentenceCount - 1) *
+            (effectiveIntensity === 'high' ? 0.16 : effectiveIntensity === 'medium' ? 0.11 : 0.07);
+        const longSentenceMins = sentenceDensity * Math.max(1, metrics.sentenceCount) *
+            (effectiveIntensity === 'high' ? 0.2 : effectiveIntensity === 'medium' ? 0.13 : 0.08);
+        const punctuationMins = punctuationCount * (effectiveIntensity === 'high' ? 0.032 : effectiveIntensity === 'medium' ? 0.022 : 0.014);
+        const longDraftMins = longDraftLoad * (effectiveIntensity === 'high' ? 4.8 : effectiveIntensity === 'medium' ? 3.1 : 1.7);
+        const correctionHeadroom = effectiveIntensity === 'high'
+            ? 1.22
+            : effectiveIntensity === 'medium'
+                ? 1.13
+                : 1.05;
+        const baselineHeadroomMins = effectiveIntensity === 'high'
+            ? 2.25
+            : effectiveIntensity === 'medium'
+                ? 1.2
+                : 0.35;
 
-        if (metrics.wordCount >= 36) {
-            multiplier += 0.1;
+        let rawMinutes = (
+            baseTypingMins +
+            paragraphMins +
+            denseParagraphMins +
+            sentenceMins +
+            longSentenceMins +
+            punctuationMins +
+            longDraftMins
+        ) * correctionHeadroom + baselineHeadroomMins;
+
+        if (metrics.looksStructured) {
+            rawMinutes -= 0.7;
         }
-        if (metrics.wordCount >= 90) {
-            multiplier += 0.12;
+        if (metrics.wordCount < 30) {
+            rawMinutes -= 0.45;
         }
-        if (metrics.wordCount >= 170) {
-            multiplier += 0.1;
-        }
-        if (metrics.paragraphCount >= 2) {
-            multiplier += 0.08;
-            additiveMins += 1;
+        if (metrics.charCount >= 1200) {
+            rawMinutes += effectiveIntensity === 'high' ? 2.4 : effectiveIntensity === 'medium' ? 1.5 : 0.8;
         }
         if (metrics.paragraphCount >= 4) {
-            multiplier += 0.06;
-            additiveMins += 2;
-        }
-        if (metrics.sentenceCount >= 6 && metrics.averageSentenceWordCount >= 9) {
-            multiplier += 0.08;
-        }
-        if (metrics.averageWordLength >= 4.8) {
-            multiplier += 0.04;
-        }
-        if (!metrics.looksStructured) {
-            multiplier += 0.05;
-        } else {
-            multiplier -= 0.08;
-        }
-        if (metrics.punctuationRatio >= 0.028 && metrics.punctuationRatio <= 0.075) {
-            multiplier += 0.04;
+            rawMinutes += effectiveIntensity === 'high' ? 2.1 : effectiveIntensity === 'medium' ? 1.4 : 0.7;
         }
 
-        const suggestedIntensity = correctionRecommendation?.intensity || 'medium';
-        if (suggestedIntensity === 'high') {
-            multiplier += 0.16;
-            additiveMins += 1;
-        } else if (suggestedIntensity === 'medium') {
-            multiplier += 0.08;
-        }
-
-        if (metrics.charCount < 160) {
-            multiplier -= 0.08;
-        }
-        if (metrics.looksStructured && metrics.symbolRatio >= 0.014) {
-            multiplier -= 0.05;
-        }
-
-        const rawMinutes = Math.max(minimum, (minimum * clamp(multiplier, 1.05, 1.9)) + additiveMins);
-        const minutes = roundRecommendedDurationMins(Math.min(MAX_DURATION_MINS, rawMinutes), minimum);
+        const minimumFloor = minimum * (
+            effectiveIntensity === 'high'
+                ? 1.36
+                : effectiveIntensity === 'medium'
+                    ? 1.18
+                    : 1.04
+        );
+        const absoluteFloor = minimum + (
+            effectiveIntensity === 'high'
+                ? 2.4
+                : effectiveIntensity === 'medium'
+                    ? 1.2
+                    : 0.2
+        );
+        const minutes = Math.min(
+            MAX_DURATION_MINS,
+            Math.max(minimum, Math.ceil(Math.max(rawMinutes, minimumFloor, absoluteFloor)))
+        );
 
         if (minutes <= minimum) {
             return {
+                intensity: effectiveIntensity,
                 minutes: minimum,
                 reason: 'This draft is short or structured enough that the minimum duration is already a good fit.'
             };
         }
 
-        if (suggestedIntensity === 'high') {
+        if (effectiveIntensity === 'high') {
             return {
+                intensity: effectiveIntensity,
                 minutes,
-                reason: 'Recommended duration adds more room for pauses, corrections, and delayed repairs on this draft.'
+                reason: 'Recommended duration leaves extra room for high correction intensity across longer paragraphs, pauses, and delayed repairs.'
             };
         }
 
         if (metrics.looksStructured) {
             return {
+                intensity: effectiveIntensity,
                 minutes,
                 reason: 'Recommended duration keeps a little extra pacing headroom without overdoing corrections on structured text.'
             };
         }
 
         return {
+            intensity: effectiveIntensity,
             minutes,
-            reason: 'Recommended duration leaves more room than the hard minimum for pacing, corrections, and clean recovery points.'
+            reason: effectiveIntensity === 'low'
+                ? 'Recommended duration keeps the run light while still leaving a little more room than the hard minimum.'
+                : 'Recommended duration leaves more room than the hard minimum for pacing, corrections, and cleaner recovery points.'
         };
-    }
-
-    function roundRecommendedDurationMins(value, minimumDurationMins = MIN_DURATION_MINS) {
-        const minutes = Math.max(minimumDurationMins, Math.ceil(Number(value) || minimumDurationMins));
-        let step = 1;
-        if (minutes >= 1440) {
-            step = 60;
-        } else if (minutes >= 480) {
-            step = 30;
-        } else if (minutes >= 180) {
-            step = 15;
-        } else if (minutes >= 60) {
-            step = 10;
-        } else if (minutes >= 15) {
-            step = 5;
-        }
-
-        return Math.min(MAX_DURATION_MINS, Math.max(minimumDurationMins, Math.ceil(minutes / step) * step));
     }
 
     function clamp(value, min, max) {

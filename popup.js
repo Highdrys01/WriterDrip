@@ -596,7 +596,7 @@ function renderStatus() {
             title: 'Duration too short',
             message: `This draft needs at least ${formatDuration(minimumDuration)} to run cleanly.`,
             hint: draftAnalysis.recommendedDurationMins > minimumDuration
-                ? `The hard minimum is ${formatDuration(minimumDuration)}, but WriterDrip recommends ${formatDuration(draftAnalysis.recommendedDurationMins)} for this draft.`
+                ? `The hard minimum is ${formatDuration(minimumDuration)}, but WriterDrip recommends ${formatRecommendedDuration(draftAnalysis)}.`
                 : 'WriterDrip uses a draft-sized minimum so it has enough time to finish the full typing process.',
             tone: 'warn'
         });
@@ -628,7 +628,7 @@ function renderStatus() {
         title: 'Ready to start',
         message: 'WriterDrip is ready in the current Google Doc.',
         hint: draftAnalysis.recommendedDurationMins > minimumDuration
-            ? `${draftAnalysis.recommendedDurationReason || 'WriterDrip recommends a little more room than the minimum for this draft.'} The hard minimum is still ${formatDuration(minimumDuration)}.`
+            ? `${draftAnalysis.recommendedDurationReason || 'WriterDrip recommends a little more room than the minimum for this draft.'} The hard minimum is still ${formatDuration(minimumDuration)}. Recommended right now: ${formatRecommendedDuration(draftAnalysis)}.`
             : 'Click inside the document body first if Google Docs just loaded. You can pause later if you want to continue another time.',
         tone: 'muted'
     });
@@ -666,7 +666,7 @@ function syncButtons() {
         pauseBtn.innerText = 'Review before resume';
     }
     durationMeta.innerText = hasDraft
-        ? `Recommended ${formatDurationShort(draftAnalysis.recommendedDurationMins || minimumDuration)}`
+        ? `${formatCorrectionIntensity(draftAnalysis.recommendedDurationIntensity || draftAnalysis.suggestedCorrectionIntensity)} rec. ${formatDurationShort(draftAnalysis.recommendedDurationMins || minimumDuration)}`
         : formatDurationShort(durationInput.value);
 }
 
@@ -781,7 +781,7 @@ function collectDraftJob() {
             title: 'Duration too short',
             message: `Choose a duration between ${formatDuration(minimumDuration)} and ${formatDuration(MAX_DURATION_MINS)}.`,
             hint: draftAnalysis.recommendedDurationMins > minimumDuration
-                ? `The hard minimum is ${formatDuration(minimumDuration)}, but WriterDrip recommends ${formatDuration(draftAnalysis.recommendedDurationMins)} for this draft.`
+                ? `The hard minimum is ${formatDuration(minimumDuration)}, but WriterDrip recommends ${formatRecommendedDuration(draftAnalysis)}.`
                 : 'The minimum changes with draft size so WriterDrip has enough time to finish the whole typing run.',
             tone: 'warn'
         });
@@ -1108,8 +1108,8 @@ function buildCompatibilityPreflightReport(context = {}) {
                 label: 'Duration fits this draft',
                 pass: validDuration,
                 detail: validDuration
-                    ? `Current duration: ${formatDuration(durationValue)}. Recommended: ${formatDuration(draftAnalysis.recommendedDurationMins || draftAnalysis.minimumDurationMins)}.`
-                    : `Use at least ${formatDuration(draftAnalysis.minimumDurationMins)} for this draft. Recommended: ${formatDuration(draftAnalysis.recommendedDurationMins || draftAnalysis.minimumDurationMins)}.`
+                    ? `Current duration: ${formatDuration(durationValue)}. Recommended: ${formatRecommendedDuration(draftAnalysis)}.`
+                    : `Use at least ${formatDuration(draftAnalysis.minimumDurationMins)} for this draft. Recommended: ${formatRecommendedDuration(draftAnalysis)}.`
             },
             {
                 id: 'compatibility',
@@ -1616,13 +1616,22 @@ function buildCorrectionModeDescription(intensity) {
     return 'Medium keeps corrections noticeable, balanced, and more varied without pushing into the heaviest repair behavior.';
 }
 
+function formatRecommendedDuration(draftAnalysis) {
+    const minutes = draftAnalysis?.recommendedDurationMins || draftAnalysis?.minimumDurationMins || 0;
+    const intensity = draftAnalysis?.recommendedDurationIntensity || draftAnalysis?.suggestedCorrectionIntensity || 'medium';
+    return `${formatDuration(minutes)} for ${formatCorrectionIntensity(intensity)}`;
+}
+
 function formatCorrectionIntensity(value) {
     const normalized = normalizeCorrectionIntensity(value);
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
 function getDraftAnalysis(text = inputText.value, durationMins = Number.parseFloat(durationInput.value)) {
-    return analyzeDraftText(text, durationMins);
+    return analyzeDraftText(text, {
+        durationMins,
+        correctionIntensity: selectedCorrectionIntensity
+    });
 }
 
 function normalizeDurationFieldValue(options = {}) {
