@@ -276,7 +276,8 @@ function bindEvents() {
     correctionButtons.forEach((button) => {
         button.addEventListener('click', async () => {
             selectedCorrectionIntensity = normalizeCorrectionIntensity(button.dataset.intensity);
-            updateCorrectionUi();
+            resetPreflightState();
+            render();
             queuePreflightRefresh();
             await saveDraft();
         });
@@ -835,9 +836,11 @@ function getPreflightRequestKey() {
         currentTabId || 'no-tab',
         currentPageKind || 'no-page-kind',
         extractGoogleDocKey(currentTabUrl) || 'no-doc',
+        selectedCorrectionIntensity,
         draftAnalysis.charCount,
         draftAnalysis.wordCount,
         draftAnalysis.minimumDurationMins,
+        draftAnalysis.recommendedDurationMins,
         durationInput.value || ''
     ].join('|');
 }
@@ -991,6 +994,7 @@ async function refreshPreflightReport(options = {}) {
 
     const requestKey = getPreflightRequestKey();
     if (!options.force && preflightState.status === 'ready' && preflightState.requestKey === requestKey) {
+        render();
         return preflightState.report;
     }
 

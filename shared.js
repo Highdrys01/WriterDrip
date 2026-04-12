@@ -11,6 +11,10 @@
     const MAX_DURATION_MINS = 10080;
     const CORRECTION_INTENSITIES = Object.freeze(['suggested', 'low', 'medium', 'high']);
     const CORRECTION_INTENSITY_SET = new Set(CORRECTION_INTENSITIES);
+    const WORD_REGEX = /\p{L}+/gu;
+    const LETTER_REGEX = /\p{L}/gu;
+    const UPPERCASE_REGEX = /\p{Lu}/gu;
+    const SYMBOL_REGEX = /[^\p{L}\d\s.,!?;:'"()\-]/gu;
 
     function normalizeCorrectionIntensity(value) {
         const normalized = String(value || '').trim().toLowerCase();
@@ -97,12 +101,12 @@
         const analyzeOptions = resolveAnalyzeOptions(durationOrOptions, maybeOptions);
         const sanitized = sanitizeDraftText(text);
         const trimmed = sanitized.trim();
-        const words = sanitized.match(/[A-Za-z]+/g) || [];
-        const letters = sanitized.match(/[A-Za-z]/g) || [];
-        const uppercase = sanitized.match(/[A-Z]/g) || [];
+        const words = sanitized.match(WORD_REGEX) || [];
+        const letters = sanitized.match(LETTER_REGEX) || [];
+        const uppercase = sanitized.match(UPPERCASE_REGEX) || [];
         const punctuation = sanitized.match(/[.,!?;:]/g) || [];
         const newlines = sanitized.match(/\n/g) || [];
-        const symbols = sanitized.match(/[^A-Za-z0-9\s.,!?;:'"()\-]/g) || [];
+        const symbols = sanitized.match(SYMBOL_REGEX) || [];
         const digits = sanitized.match(/\d/g) || [];
         const nonEmptyLines = trimmed ? trimmed.split('\n').map((line) => line.trim()).filter(Boolean) : [];
         const paragraphs = trimmed ? trimmed.split(/\n\s*\n+/).map((paragraph) => paragraph.trim()).filter(Boolean) : [];
@@ -335,9 +339,25 @@
         }
 
         const requestedIntensity = normalizeCorrectionIntensity(correctionIntensity);
-        const effectiveIntensity = requestedIntensity === 'suggested'
-            ? (correctionRecommendation?.intensity || 'medium')
-            : requestedIntensity;
+        const suggestedBlend = Number.isFinite(correctionRecommendation?.normalizedScore)
+            ? correctionRecommendation.normalizedScore
+            : (correctionRecommendation?.intensity === 'high'
+                ? 1
+                : correctionRecommendation?.intensity === 'low'
+                    ? 0
+                    : 0.5);
+        const intensityBlend = requestedIntensity === 'suggested'
+            ? clamp(suggestedBlend, 0, 1)
+            : requestedIntensity === 'high'
+                ? 1
+                : requestedIntensity === 'low'
+                    ? 0
+                    : 0.5;
+        const effectiveIntensity = intensityBlend < 0.34
+            ? 'low'
+            : intensityBlend < 0.68
+                ? 'medium'
+                : 'high';
         const punctuationCount = Math.round(metrics.punctuationRatio * metrics.charCount);
         const wordsPerParagraph = metrics.paragraphCount
             ? metrics.wordCount / Math.max(1, metrics.paragraphCount)
@@ -346,32 +366,20 @@
         const sentenceDensity = clamp((metrics.averageSentenceWordCount - 11) / 9, 0, 1.5);
         const longDraftLoad = clamp((metrics.wordCount - 80) / 180, 0, 1.7);
         const proseBias = metrics.looksStructured ? 0.86 : 1;
-        const targetWordsPerMinute = effectiveIntensity === 'high'
-            ? 36
-            : effectiveIntensity === 'medium'
-                ? 44
-                : 53;
+        const targetWordsPerMinute = interpolateAdaptiveValue(53, 44, 36, intensityBlend);
         const baseTypingMins = (metrics.wordCount / Math.max(1, targetWordsPerMinute)) * proseBias;
         const paragraphMins = metrics.paragraphCount <= 1
             ? 0
-            : (metrics.paragraphCount - 1) * (effectiveIntensity === 'high' ? 1.2 : effectiveIntensity === 'medium' ? 0.9 : 0.55);
-        const denseParagraphMins = paragraphDensity * (effectiveIntensity === 'high' ? 3.1 : effectiveIntensity === 'medium' ? 2.05 : 1.1);
+            : (metrics.paragraphCount - 1) * interpolateAdaptiveValue(0.55, 0.9, 1.2, intensityBlend);
+        const denseParagraphMins = paragraphDensity * interpolateAdaptiveValue(1.1, 2.05, 3.1, intensityBlend);
         const sentenceMins = Math.max(0, metrics.sentenceCount - 1) *
-            (effectiveIntensity === 'high' ? 0.16 : effectiveIntensity === 'medium' ? 0.11 : 0.07);
+            interpolateAdaptiveValue(0.07, 0.11, 0.16, intensityBlend);
         const longSentenceMins = sentenceDensity * Math.max(1, metrics.sentenceCount) *
-            (effectiveIntensity === 'high' ? 0.2 : effectiveIntensity === 'medium' ? 0.13 : 0.08);
-        const punctuationMins = punctuationCount * (effectiveIntensity === 'high' ? 0.032 : effectiveIntensity === 'medium' ? 0.022 : 0.014);
-        const longDraftMins = longDraftLoad * (effectiveIntensity === 'high' ? 4.8 : effectiveIntensity === 'medium' ? 3.1 : 1.7);
-        const correctionHeadroom = effectiveIntensity === 'high'
-            ? 1.22
-            : effectiveIntensity === 'medium'
-                ? 1.13
-                : 1.05;
-        const baselineHeadroomMins = effectiveIntensity === 'high'
-            ? 2.25
-            : effectiveIntensity === 'medium'
-                ? 1.2
-                : 0.35;
+            interpolateAdaptiveValue(0.08, 0.13, 0.2, intensityBlend);
+        const punctuationMins = punctuationCount * interpolateAdaptiveValue(0.014, 0.022, 0.032, intensityBlend);
+        const longDraftMins = longDraftLoad * interpolateAdaptiveValue(1.7, 3.1, 4.8, intensityBlend);
+        const correctionHeadroom = interpolateAdaptiveValue(1.05, 1.13, 1.22, intensityBlend);
+        const baselineHeadroomMins = interpolateAdaptiveValue(0.35, 1.2, 2.25, intensityBlend);
 
         let rawMinutes = (
             baseTypingMins +
@@ -390,26 +398,14 @@
             rawMinutes -= 0.45;
         }
         if (metrics.charCount >= 1200) {
-            rawMinutes += effectiveIntensity === 'high' ? 2.4 : effectiveIntensity === 'medium' ? 1.5 : 0.8;
+            rawMinutes += interpolateAdaptiveValue(0.8, 1.5, 2.4, intensityBlend);
         }
         if (metrics.paragraphCount >= 4) {
-            rawMinutes += effectiveIntensity === 'high' ? 2.1 : effectiveIntensity === 'medium' ? 1.4 : 0.7;
+            rawMinutes += interpolateAdaptiveValue(0.7, 1.4, 2.1, intensityBlend);
         }
 
-        const minimumFloor = minimum * (
-            effectiveIntensity === 'high'
-                ? 1.36
-                : effectiveIntensity === 'medium'
-                    ? 1.18
-                    : 1.04
-        );
-        const absoluteFloor = minimum + (
-            effectiveIntensity === 'high'
-                ? 2.4
-                : effectiveIntensity === 'medium'
-                    ? 1.2
-                    : 0.2
-        );
+        const minimumFloor = minimum * interpolateAdaptiveValue(1.04, 1.18, 1.36, intensityBlend);
+        const absoluteFloor = minimum + interpolateAdaptiveValue(0.2, 1.2, 2.4, intensityBlend);
         const minutes = Math.min(
             MAX_DURATION_MINS,
             Math.max(minimum, Math.ceil(Math.max(rawMinutes, minimumFloor, absoluteFloor)))
@@ -423,19 +419,21 @@
             };
         }
 
+        if (metrics.looksStructured) {
+            return {
+                intensity: effectiveIntensity,
+                minutes,
+                reason: requestedIntensity === 'high'
+                    ? 'Recommended duration stays conservative here because structured text keeps high correction intensity on a tighter leash.'
+                    : 'Recommended duration keeps a little extra pacing headroom without overdoing corrections on structured text.'
+            };
+        }
+
         if (effectiveIntensity === 'high') {
             return {
                 intensity: effectiveIntensity,
                 minutes,
                 reason: 'Recommended duration leaves extra room for high correction intensity across longer paragraphs, pauses, and delayed repairs.'
-            };
-        }
-
-        if (metrics.looksStructured) {
-            return {
-                intensity: effectiveIntensity,
-                minutes,
-                reason: 'Recommended duration keeps a little extra pacing headroom without overdoing corrections on structured text.'
             };
         }
 
@@ -450,6 +448,14 @@
 
     function clamp(value, min, max) {
         return Math.min(max, Math.max(min, value));
+    }
+
+    function interpolateAdaptiveValue(lowValue, mediumValue, highValue, blend) {
+        const clampedBlend = clamp(blend, 0, 1);
+        if (clampedBlend <= 0.5) {
+            return lowValue + ((mediumValue - lowValue) * (clampedBlend / 0.5));
+        }
+        return mediumValue + ((highValue - mediumValue) * ((clampedBlend - 0.5) / 0.5));
     }
 
     function normalizeSuggestedCorrectionScore(score, metrics) {

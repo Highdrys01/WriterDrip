@@ -446,6 +446,8 @@ async function validatePlanner() {
     const structuredDraftAnalysis = shared.analyzeDraftText('HTTP_STATUS=200\nCONFIG={READY:true}', 30);
     assert.equal(structuredDraftAnalysis.suggestedCorrectionIntensity, 'low', 'Structured drafts should suggest low correction intensity.');
     assert.match(structuredDraftAnalysis.suggestedCorrectionReason, /structured|technical/i, 'Structured drafts should explain why the suggestion stayed low.');
+    const structuredHighDuration = shared.analyzeDraftText('HTTP_STATUS=200\nCONFIG={READY:true}', { durationMins: 30, correctionIntensity: 'high' });
+    assert.match(structuredHighDuration.recommendedDurationReason, /conservative|structured text|tighter leash/i, 'Structured drafts should keep high-intensity duration messaging conservative.');
 
     const shortDraftAnalysis = shared.analyzeDraftText('Quick note to finish tonight.', 5);
     assert.equal(shortDraftAnalysis.suggestedCorrectionIntensity, 'low', 'Very short drafts should stay on low suggestion.');
@@ -456,6 +458,8 @@ async function validatePlanner() {
     assert.equal(shared.normalizeDurationMins('2.2', 1), 3, 'Duration normalization should round partial minutes up.');
     assert.equal(shared.normalizeDurationMins('0.2', 5), 5, 'Duration normalization should respect the current draft minimum.');
     assert.equal(shared.normalizeDurationMins('abc', 5), null, 'Duration normalization should reject invalid numeric input.');
+    const accentedDraftAnalysis = shared.analyzeDraftText('Café naïve résumé. Voilà, déjà vu in plain prose.', { durationMins: 30, correctionIntensity: 'suggested' });
+    assert.equal(accentedDraftAnalysis.looksStructured, false, 'Accented prose should not be misclassified as structured text.');
 
     const balancedDraftAnalysis = shared.analyzeDraftText(
         'This draft is long enough to feel like normal prose, but it is not massive. It has a few sentences, some commas, and a steady rhythm throughout the paragraph.',
