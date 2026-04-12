@@ -6,7 +6,7 @@
     <title>WriterDrip | Free Open-Source Google Docs Typing Extension</title>
     <meta
       name="description"
-      content="WriterDrip is a free open-source Chrome extension for paced typing in Google Docs with flexible timelines, pause and resume controls, local-only behavior, and draft-aware correction intensity."
+      content="WriterDrip is a free open-source Chrome extension for paced typing in Google Docs with a draft-aware correction engine, flexible timelines, pause and resume controls, and local-only behavior."
     >
     <meta name="google-site-verification" content="TsaaG3rlKwIRPHJNA5X-_BgfM1zNftYRJpHMGIjUyvQ">
     <meta name="robots" content="index,follow,max-image-preview:large">
@@ -15,7 +15,7 @@
     <meta property="og:title" content="WriterDrip | Free Open-Source Google Docs Typing Extension">
     <meta
       property="og:description"
-      content="A free open-source Chrome extension for paced typing in Google Docs with custom timelines, pause/resume controls, and draft-aware correction intensity."
+      content="A free open-source Chrome extension for paced typing in Google Docs with a smarter correction engine, custom timelines, and pause/resume controls."
     >
     <meta property="og:url" content="https://highdrys01.github.io/WriterDrip/">
     <meta property="og:image" content="https://highdrys01.github.io/WriterDrip/assets/social-preview.png">
@@ -23,7 +23,7 @@
     <meta name="twitter:title" content="WriterDrip | Free Open-Source Google Docs Typing Extension">
     <meta
       name="twitter:description"
-      content="Free open-source paced typing for Google Docs with custom timelines, pause/resume controls, and draft-aware correction intensity."
+      content="Free open-source paced typing for Google Docs with a smarter correction engine, custom timelines, and pause/resume controls."
     >
     <meta name="twitter:image" content="https://highdrys01.github.io/WriterDrip/assets/social-preview.png">
     <link rel="stylesheet" href="styles.css">
@@ -34,7 +34,7 @@
         "name": "WriterDrip",
         "applicationCategory": "BrowserApplication",
         "operatingSystem": "Chrome, Chromium-based browsers",
-        "description": "WriterDrip is a free open-source Chrome extension for paced typing in Google Docs with flexible timelines, pause and resume controls, local-only behavior, and draft-aware correction intensity.",
+        "description": "WriterDrip is a free open-source Chrome extension for paced typing in Google Docs with a draft-aware correction engine, flexible timelines, pause and resume controls, and local-only behavior.",
         "offers": {
           "@type": "Offer",
           "price": 0,
@@ -55,8 +55,8 @@
           <h1>WriterDrip</h1>
           <p class="lede">
             WriterDrip types user-provided text into the Google Doc already open in your browser over
-            a chosen timeline, with pause or resume controls, local-only behavior, and draft-aware
-            correction intensity.
+            a chosen timeline, with a smarter correction engine for typos, spacing slips, punctuation
+            mistakes, and delayed repairs, plus pause or resume controls and local-only behavior.
           </p>
           <div class="hero-actions">
             <a class="button button-primary" href="https://github.com/Highdrys01/WriterDrip">View on GitHub</a>
@@ -64,7 +64,7 @@
           </div>
           <ul class="quick-points">
             <li>Works with the Google Doc already open in your browser</li>
-            <li>Flexible timing from the draft minimum up to one week</li>
+            <li>Correction engine can vary typos, spacing, punctuation, repeated words, and repairs by draft</li>
             <li>Pause, resume, stop, and recover the same run from the same Google Doc later</li>
           </ul>
         </div>
@@ -85,13 +85,31 @@
             <h2>WriterDrip is a free open-source alternative.</h2>
             <p>
               If you searched for Dripwriter, WriterDrip gives you a similar paced typing workflow for
-              Google Docs without a paywall. WriterDrip is an independent project and is not affiliated
-              with Dripwriter.
+              Google Docs without a paywall, with a correction engine that focuses on typo variety,
+              delayed fixes, and same-Doc recovery. WriterDrip is an independent project and is not
+              affiliated with Dripwriter.
             </p>
           </div>
         </section>
 
         <section class="section feature-grid" id="features">
+          <article class="feature-card">
+            <div class="feature-copy">
+              <p class="section-label">Correction engine</p>
+              <h2>Built around the fix-up behavior people actually notice.</h2>
+              <p>
+                WriterDrip can mix typo depth, spacing slips, punctuation substitutions, repeated
+                words, and delayed repairs while still resolving back to the original draft.
+              </p>
+            </div>
+            <img
+              src="assets/writerdrip-correction-card.png"
+              alt="WriterDrip correction intensity controls"
+              width="480"
+              height="357"
+            >
+          </article>
+
           <article class="feature-card">
             <div class="feature-copy">
               <p class="section-label">Flexible timing</p>
@@ -106,23 +124,6 @@
               alt="WriterDrip duration controls with quick presets"
               width="480"
               height="488"
-            >
-          </article>
-
-          <article class="feature-card">
-            <div class="feature-copy">
-              <p class="section-label">Draft-aware corrections</p>
-              <h2>Let WriterDrip tune correction intensity automatically.</h2>
-              <p>
-                Keep it on Suggested for the draft-aware default, or switch to Low, Medium, or High
-                when you want more manual control.
-              </p>
-            </div>
-            <img
-              src="assets/writerdrip-correction-card.png"
-              alt="WriterDrip correction intensity controls"
-              width="480"
-              height="357"
             >
           </article>
         </section>
@@ -162,6 +163,10 @@
             <h2>What people usually want to know first.</h2>
           </div>
           <div class="faq-grid">
+            <article>
+              <h3>Does it just type straight through?</h3>
+              <p>No. WriterDrip is built around a correction engine that can introduce and fix typos, spacing slips, punctuation mistakes, repeated words, and delayed repairs while keeping the final text aligned to the draft.</p>
+            </article>
             <article>
               <h3>Does WriterDrip use my Google account?</h3>
               <p>No. WriterDrip works against the Google Doc already open in your browser and does not require OAuth.</p>

@@ -1,6 +1,6 @@
 # WriterDrip
 
-WriterDrip is a free and open-source Chrome extension for paced typing in Google Docs. If you are looking for a free Dripwriter alternative, WriterDrip is an independent open-source option that types user-provided text into the Google Doc already open in your browser over a chosen timeline, with pause or resume controls, flexible session lengths, and draft-aware correction intensity.
+WriterDrip is a free and open-source Chrome extension for paced typing in Google Docs. If you are looking for a free Dripwriter alternative, WriterDrip is an independent open-source option built around the part people actually care about most: a draft-aware correction engine that can introduce and fix typos, spacing slips, punctuation mistakes, repeated words, and delayed repairs while still resolving back to the original final draft.
 
 Local-first, always free, and built for the Google Doc already open in your browser.
 
@@ -25,23 +25,30 @@ Local-first, always free, and built for the Google Doc already open in your brow
 - If the Doc tab reloads or closes unexpectedly, reopen the same Google Doc and use `Resume` if WriterDrip offers it.
 - Reload the extension from `chrome://extensions` after pulling updates from GitHub.
 
+## Why People Use It
+
+- Types into the Google Doc already open in your browser instead of dumping the whole draft at once
+- Uses a correction engine with typo variety, spacing slips, punctuation substitutions, repeated words, and delayed repairs
+- Lets you keep `Suggested` on for draft-aware correction behavior or switch to `Low`, `Medium`, or `High`
+- Supports pause, resume, stop, and same-Doc recovery when a run gets interrupted
+
 ## Feature Tour
 
 <table>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/assets/writerdrip-duration-card.png" alt="WriterDrip duration controls" width="100%">
-      <br>
-      <strong>Choose the timeline</strong>
-      <br>
-      Pick a custom duration, use the quick presets, and let WriterDrip scale from the draft minimum up to longer sessions.
-    </td>
-    <td align="center" width="50%">
       <img src="docs/assets/writerdrip-correction-card.png" alt="WriterDrip correction intensity controls" width="100%">
       <br>
-      <strong>Tune correction intensity</strong>
+      <strong>Lead with the correction engine</strong>
       <br>
-      Leave it on <code>Suggested</code> for draft-aware behavior or switch to a lighter or stronger correction profile yourself.
+      WriterDrip can vary typo depth, spacing slips, punctuation mistakes, repeated words, and repair behavior while keeping the final text exact.
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/writerdrip-duration-card.png" alt="WriterDrip duration controls" width="100%">
+      <br>
+      <strong>Shape the timing around the draft</strong>
+      <br>
+      Pick a custom duration, use the quick presets, and let WriterDrip scale from the draft minimum up to longer sessions.
     </td>
   </tr>
 </table>
@@ -50,8 +57,9 @@ Local-first, always free, and built for the Google Doc already open in your brow
 
 - Works on a Google Doc you already opened and selected in your browser
 - Lets you choose a custom duration from the draft-sized minimum up to 1 week, or use built-in 1 hour, 1 day, and 1 week presets
-- Adds layered pacing with burst pauses, sentence or paragraph rests, and context-aware self-correction
+- Adds layered pacing with burst pauses, sentence or paragraph rests, and a richer correction engine instead of just clean straight-through typing
 - Includes `Suggested`, `Low`, `Medium`, and `High` correction intensity modes, with `Suggested` adapting to the current draft automatically
+- Can introduce and repair transpositions, missed letters, nearby-key slips, spacing mistakes, punctuation substitutions, repeated words, and delayed corrections
 - Runs a preflight start check before typing so the current Doc, editor surface, and typing context are ready
 - Supports pause, resume, and stop controls
 - Keeps paused runs recoverable so you can reopen the same Google Doc later and continue from there
@@ -92,6 +100,11 @@ Local-first, always free, and built for the Google Doc already open in your brow
 
 - In Google Docs, open `Tools > Preferences`.
 - Turn off Smart Compose, spelling or grammar suggestions, and substitutions that keep rewriting text.
+
+### It feels too clean or too sloppy
+
+- Leave correction intensity on `Suggested` first, because it adapts to draft length, structure, and pacing.
+- Use `Low` for short or technical drafts, `Medium` for normal prose, and `High` when you want the correction engine to stay more active.
 
 ## Privacy
 
