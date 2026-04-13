@@ -440,33 +440,33 @@
         );
         const proseBias = metrics.looksStructured ? 0.86 : 1;
         const targetWordsPerMinute = clamp(
-            52 * (
+            47.5 * (
                 1 - (
-                    0.16 +
-                    (sentenceDensity * 0.08) +
-                    (paragraphDensity * 0.075) +
-                    (longDraftLoad * 0.055) +
-                    (revisionLoad * 0.018) +
-                    (intensityBlend * 0.12)
+                    0.18 +
+                    (sentenceDensity * 0.09) +
+                    (paragraphDensity * 0.085) +
+                    (longDraftLoad * 0.065) +
+                    (revisionLoad * 0.022) +
+                    (intensityBlend * 0.14)
                 )
             ),
-            metrics.looksStructured ? 24 : 18,
-            metrics.looksStructured ? 46 : 42
+            metrics.looksStructured ? 22 : 16,
+            metrics.looksStructured ? 44 : 38
         );
         const baseTypingMins = (metrics.wordCount / Math.max(1, targetWordsPerMinute)) * proseBias;
         const paragraphMins = metrics.paragraphCount <= 1
             ? 0
-            : (metrics.paragraphCount - 1) * interpolateAdaptiveValue(0.55, 0.9, 1.2, intensityBlend);
-        const denseParagraphMins = paragraphDensity * interpolateAdaptiveValue(1.1, 2.05, 3.1, intensityBlend);
+            : (metrics.paragraphCount - 1) * interpolateAdaptiveValue(0.6, 1, 1.35, intensityBlend);
+        const denseParagraphMins = paragraphDensity * interpolateAdaptiveValue(1.25, 2.35, 3.55, intensityBlend);
         const sentenceMins = Math.max(0, metrics.sentenceCount - 1) *
-            interpolateAdaptiveValue(0.07, 0.11, 0.16, intensityBlend);
+            interpolateAdaptiveValue(0.075, 0.125, 0.19, intensityBlend);
         const longSentenceMins = sentenceDensity * Math.max(1, metrics.sentenceCount) *
-            interpolateAdaptiveValue(0.08, 0.13, 0.2, intensityBlend);
-        const punctuationMins = punctuationCount * interpolateAdaptiveValue(0.014, 0.022, 0.032, intensityBlend);
-        const revisionMins = revisionLoad * interpolateAdaptiveValue(0.22, 0.34, 0.52, intensityBlend);
-        const longDraftMins = longDraftLoad * interpolateAdaptiveValue(1.7, 3.1, 4.8, intensityBlend);
-        const correctionHeadroom = interpolateAdaptiveValue(1.05, 1.13, 1.22, intensityBlend);
-        const baselineHeadroomMins = interpolateAdaptiveValue(0.35, 1.2, 2.25, intensityBlend);
+            interpolateAdaptiveValue(0.09, 0.15, 0.24, intensityBlend);
+        const punctuationMins = punctuationCount * interpolateAdaptiveValue(0.016, 0.025, 0.036, intensityBlend);
+        const revisionMins = revisionLoad * interpolateAdaptiveValue(0.28, 0.42, 0.62, intensityBlend);
+        const longDraftMins = longDraftLoad * interpolateAdaptiveValue(2, 3.6, 5.4, intensityBlend);
+        const correctionHeadroom = interpolateAdaptiveValue(1.1, 1.2, 1.34, intensityBlend);
+        const baselineHeadroomMins = interpolateAdaptiveValue(0.45, 1.5, 2.8, intensityBlend);
 
         let rawMinutes = (
             baseTypingMins +
@@ -492,8 +492,8 @@
             rawMinutes += interpolateAdaptiveValue(0.7, 1.4, 2.1, intensityBlend);
         }
 
-        const minimumFloor = minimum * interpolateAdaptiveValue(1.04, 1.18, 1.36, intensityBlend);
-        const absoluteFloor = minimum + interpolateAdaptiveValue(0.2, 1.2, 2.4, intensityBlend);
+        const minimumFloor = minimum * interpolateAdaptiveValue(1.08, 1.24, 1.48, intensityBlend);
+        const absoluteFloor = minimum + interpolateAdaptiveValue(0.4, 1.8, 3.2, intensityBlend);
         const minutes = Math.min(
             MAX_DURATION_MINS,
             Math.max(minimum, Math.ceil(Math.max(rawMinutes, minimumFloor, absoluteFloor)))

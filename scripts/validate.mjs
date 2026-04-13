@@ -522,6 +522,10 @@ async function validatePlanner() {
     assert.ok(mediumProfile.repairMessinessChance > lowProfile.repairMessinessChance, 'Medium intensity should allow messier repairs than low.');
     assert.ok(highProfile.repairDepthFactor > mediumProfile.repairDepthFactor, 'High intensity should allow deeper repairs than medium.');
     assert.ok(mediumProfile.repairDepthFactor > lowProfile.repairDepthFactor, 'Medium intensity should allow deeper repairs than low.');
+    assert.ok(highProfile.lingeringRepairChance > mediumProfile.lingeringRepairChance, 'High intensity should leave more room for later corrections than medium.');
+    assert.ok(mediumProfile.lingeringRepairChance > lowProfile.lingeringRepairChance, 'Medium intensity should leave more room for later corrections than low.');
+    assert.ok(highProfile.sentenceCarryChance > mediumProfile.sentenceCarryChance, 'High intensity should allow more sentence-carry repairs than medium.');
+    assert.ok(mediumProfile.sentenceCarryChance >= lowProfile.sentenceCarryChance, 'Medium intensity should preserve at least as much sentence-carry room as low.');
     assert.ok(lowProfile.cadenceProfile && mediumProfile.cadenceProfile && highProfile.cadenceProfile, 'Draft profiles should carry a cadence profile.');
     assert.ok(highProfile.cadenceProfile.connectivePauseChance >= mediumProfile.cadenceProfile.connectivePauseChance, 'Richer drafts should preserve smarter cadence settings.');
 
@@ -611,6 +615,31 @@ async function validatePlanner() {
     assert.ok(shortContrastAverages.medium.repairs > shortContrastAverages.low.repairs, 'Medium intensity should still produce more correction activity than low on shorter prose.');
     assert.ok(shortContrastAverages.high.repairs >= shortContrastAverages.medium.repairs * 1.6, 'High intensity should stand apart clearly from medium even on shorter prose.');
     assert.ok(shortContrastAverages.high.backspaces >= shortContrastAverages.medium.backspaces * 1.8, 'High intensity should backtrack much more than medium on shorter prose.');
+
+    let delayedRepairSequences = 0;
+    for (let seed = 1; seed <= 30; seed += 1) {
+        const actions = hooks.buildActionPlan(scenarios[1].text, scenarios[1].durationMins * 60, seed, 'high');
+        let activeMistakeIndex = -1;
+        for (let index = 0; index < actions.length; index += 1) {
+            const action = actions[index];
+            if (action?.kind === 'mistake-output' && activeMistakeIndex === -1) {
+                activeMistakeIndex = index;
+                continue;
+            }
+
+            if (action?.kind === 'repair-pause' && activeMistakeIndex !== -1) {
+                const carriedChars = actions
+                    .slice(activeMistakeIndex + 1, index)
+                    .filter((candidate) => candidate?.char && candidate.char !== 'backspace' && candidate.kind !== 'mistake-output')
+                    .length;
+                if (carriedChars >= 3) {
+                    delayedRepairSequences += 1;
+                }
+                activeMistakeIndex = -1;
+            }
+        }
+    }
+    assert.ok(delayedRepairSequences > 0, 'High-intensity prose should sometimes carry a mistake forward before repairing it.');
     const variantHeavyText = `${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText} ${lowercaseVariantText}`;
     const variantAverages = {
         low: 0,

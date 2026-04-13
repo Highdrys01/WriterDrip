@@ -298,6 +298,8 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             repairMessinessScale: 0.14,
             repairAfterExtraScale: 0.56,
             repairHardExtraScale: 0.64,
+            lingeringRepairScale: 0.1,
+            sentenceCarryScale: 0.02,
             wordVariantDelayScale: 0.78
         },
         medium: {
@@ -336,6 +338,8 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             repairMessinessScale: 0.62,
             repairAfterExtraScale: 0.94,
             repairHardExtraScale: 0.96,
+            lingeringRepairScale: 0.46,
+            sentenceCarryScale: 0.12,
             wordVariantDelayScale: 1.02
         },
         high: {
@@ -374,6 +378,8 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             repairMessinessScale: 1.78,
             repairAfterExtraScale: 1.62,
             repairHardExtraScale: 1.72,
+            lingeringRepairScale: 1,
+            sentenceCarryScale: 0.34,
             wordVariantDelayScale: 1.48
         }
     };
@@ -1811,9 +1817,15 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
                     mistakenChars += 1;
                     const extraCharsSinceMistake = Math.max(0, mistakenChars - (pendingFix.initialMistakenChars || 0));
                     const wordBoundaryAhead = !isWordCharacter(chars[index + 1] || '');
+                    const boundaryRepairAllowed = canBoundaryRepair(char, canFixAtBoundary, extraCharsSinceMistake, pendingFix, rng);
+                    const wordBoundaryRepairAllowed = Boolean(
+                        pendingFix.preferWordBoundary &&
+                        wordBoundaryAhead &&
+                        extraCharsSinceMistake >= (pendingFix.minWordBoundaryExtraChars || 0)
+                    );
                     if (extraCharsSinceMistake >= pendingFix.hardExtraChars ||
-                        canFixAtBoundary ||
-                        (pendingFix.preferWordBoundary && wordBoundaryAhead) ||
+                        boundaryRepairAllowed ||
+                        wordBoundaryRepairAllowed ||
                         extraCharsSinceMistake >= pendingFix.repairAfterExtraChars) {
                         index = addRepair(index, false);
                         continue;
@@ -2068,6 +2080,22 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             realignPauseFactor: clamp((0.92 + ((paceFactor - 1) * 0.28)) * intensityProfile.realignPauseScale, 0.86, 1.16),
             repairAfterExtraScale: intensityProfile.repairAfterExtraScale || 1,
             repairHardExtraScale: intensityProfile.repairHardExtraScale || 1,
+            lingeringRepairChance: clamp(
+                (interpolateIntensityValue(0.05, 0.18, 0.42, intensityBlend) +
+                    (paragraphDensity * 0.08) +
+                    (sentenceDensity * 0.06)) *
+                    (intensityProfile.lingeringRepairScale || 0.1),
+                0.01,
+                0.48
+            ),
+            sentenceCarryChance: clamp(
+                (interpolateIntensityValue(0.01, 0.06, 0.18, intensityBlend) +
+                    ((analysis.paragraphCount >= 2 ? 1 : 0) * 0.04) +
+                    ((analysis.averageSentenceWordCount >= 12 ? 1 : 0) * 0.03)) *
+                    (intensityProfile.sentenceCarryScale || 0.02),
+                0,
+                0.18
+            ),
             wordVariantDelayScale: intensityProfile.wordVariantDelayScale || 1,
             cadenceProfile: buildCadenceProfile(analysis, targetDurationSeconds)
         };
@@ -2771,6 +2799,25 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         return false;
     }
 
+    function canBoundaryRepair(currentChar, canFixAtBoundary, extraCharsSinceMistake, pendingFix, rng) {
+        if (!pendingFix || !canFixAtBoundary) {
+            return false;
+        }
+
+        if (extraCharsSinceMistake < (pendingFix.minBoundaryExtraChars || 0)) {
+            return false;
+        }
+
+        if (pendingFix.requireClauseBoundary && ![',', ';', ':', '.', '!', '?', '\n'].includes(currentChar)) {
+            return false;
+        }
+
+        const boundaryRepairChance = Number.isFinite(pendingFix.boundaryRepairChance)
+            ? pendingFix.boundaryRepairChance
+            : 1;
+        return boundaryRepairChance >= 1 || rng() < boundaryRepairChance;
+    }
+
     function noteMistakeScheduled(plannerState, index, context, type) {
         const sentenceId = plannerState.sentenceIds[index] ?? 0;
         const segmentIndex = getSegmentIndex(index, plannerState.sentenceIds.length || 1, plannerState.segmentCounts.length || 1);
@@ -2790,6 +2837,14 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         const char = chars[index];
         const nextChar = chars[index + 1] || '';
         const immediateRepair = rng() < draftProfile.immediateRepairChance;
+        const sentenceCarryRepair = !immediateRepair &&
+            context.remainingInWord >= 1 &&
+            context.wordLength >= 5 &&
+            rng() < draftProfile.sentenceCarryChance;
+        const lingeringRepair = !immediateRepair &&
+            !sentenceCarryRepair &&
+            context.remainingInWord >= 1 &&
+            rng() < draftProfile.lingeringRepairChance;
         const preferWordBoundary = !immediateRepair && context.remainingInWord > 1 && rng() < draftProfile.preferWordBoundaryChance;
         const repairSpanLimit = Math.max(1, Math.min(context.remainingInWord, Math.round(1 + (context.remainingInWord * draftProfile.repairDepthFactor))));
         const immediateRepairBase = Math.max(1, Math.round((1 + Math.floor(rng() * 2)) * draftProfile.repairAfterExtraScale));
@@ -2798,18 +2853,39 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             Math.round((repairSpanLimit + (rng() < 0.35 ? 1 : 0)) * draftProfile.repairAfterExtraScale)
         );
         const delayedRepairBase = Math.max(1, Math.round((2 + Math.floor(rng() * 3)) * draftProfile.repairAfterExtraScale));
+        const lingeringRepairBase = Math.max(
+            repairSpanLimit + 1,
+            Math.round((repairSpanLimit + 2 + Math.floor(rng() * 3)) * (draftProfile.repairAfterExtraScale * 1.18))
+        );
+        const sentenceCarryBase = Math.max(
+            repairSpanLimit + 2,
+            Math.round((repairSpanLimit + 4 + Math.floor(rng() * 4)) * (draftProfile.repairAfterExtraScale * 1.32))
+        );
         const repairAfterExtraChars = immediateRepair
             ? Math.min(repairSpanLimit, immediateRepairBase)
-            : preferWordBoundary
-                ? Math.max(1, Math.min(context.remainingInWord, boundaryRepairBase))
-                : Math.min(repairSpanLimit, delayedRepairBase);
+            : sentenceCarryRepair
+                ? sentenceCarryBase
+                : lingeringRepair
+                    ? lingeringRepairBase
+                : preferWordBoundary
+                    ? Math.max(1, Math.min(context.remainingInWord, boundaryRepairBase))
+                    : Math.min(repairSpanLimit, delayedRepairBase);
         const hardExtraChars = Math.max(
             repairAfterExtraChars + 1,
             Math.min(
-                context.remainingInWord + 1,
+                sentenceCarryRepair
+                    ? repairAfterExtraChars + 6 + Math.floor(rng() * 4)
+                    : lingeringRepair
+                        ? repairAfterExtraChars + 4 + Math.floor(rng() * 3)
+                        : context.remainingInWord + 1,
                 repairAfterExtraChars + 1 + Math.max(1, Math.round((1 + Math.floor(rng() * 2)) * draftProfile.repairHardExtraScale))
             )
         );
+        const minBoundaryExtraChars = sentenceCarryRepair
+            ? Math.max(2, Math.min(repairAfterExtraChars - 1, 4 + Math.floor(rng() * 3)))
+            : lingeringRepair
+                ? Math.max(1, Math.min(repairAfterExtraChars - 1, 2 + Math.floor(rng() * 3)))
+                : 0;
         const plan = {
             outputs: [],
             initialMistakenChars: 0,
@@ -2822,6 +2898,10 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
                 repairAfterExtraChars,
                 hardExtraChars,
                 preferWordBoundary,
+                minBoundaryExtraChars,
+                minWordBoundaryExtraChars: lingeringRepair || sentenceCarryRepair ? minBoundaryExtraChars : 0,
+                requireClauseBoundary: sentenceCarryRepair,
+                boundaryRepairChance: sentenceCarryRepair ? 0.72 : lingeringRepair ? 0.86 : 1,
                 noticePause: (0.34 + rng() * 0.34 + Math.min(repairAfterExtraChars * 0.05, 0.18)) * draftProfile.noticePauseFactor,
                 realignPause: (0.08 + rng() * 0.14 + Math.min(context.wordLength * 0.01, 0.08)) * draftProfile.realignPauseFactor,
                 repairMessinessChance: draftProfile.repairMessinessChance,
@@ -2834,11 +2914,15 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         if (mistakeType === 'trans') {
             plan.outputs.push({
                 char: nextChar,
+                kind: 'mistake-output',
+                mistakeType: 'trans',
                 delay: baseDelay,
                 distributionWeight: 0.9
             });
             plan.outputs.push({
                 char,
+                kind: 'mistake-output',
+                mistakeType: 'trans',
                 delay: baseDelay * 0.8,
                 distributionWeight: 0.72
             });
@@ -2848,11 +2932,15 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         } else if (mistakeType === 'double') {
             plan.outputs.push({
                 char,
+                kind: 'mistake-output',
+                mistakeType: 'double',
                 delay: baseDelay,
                 distributionWeight: 0.88
             });
             plan.outputs.push({
                 char,
+                kind: 'mistake-output',
+                mistakeType: 'double',
                 delay: baseDelay * 0.52,
                 distributionWeight: 0.46
             });
@@ -2862,6 +2950,8 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             const wrongCase = char === char.toUpperCase() ? char.toLowerCase() : char.toUpperCase();
             plan.outputs.push({
                 char: wrongCase,
+                kind: 'mistake-output',
+                mistakeType: 'case',
                 delay: baseDelay,
                 distributionWeight: 0.8
             });
@@ -2874,6 +2964,8 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         } else if (mistakeType === 'vowel') {
             plan.outputs.push({
                 char: getVowelSlip(char, rng),
+                kind: 'mistake-output',
+                mistakeType: 'vowel',
                 delay: baseDelay,
                 distributionWeight: 0.78
             });
@@ -2883,6 +2975,8 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         } else if (mistakeType === 'soft') {
             plan.outputs.push({
                 char: getSoftSlip(char, rng),
+                kind: 'mistake-output',
+                mistakeType: 'soft',
                 delay: baseDelay,
                 distributionWeight: 0.8
             });
@@ -2892,6 +2986,8 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         } else {
             plan.outputs.push({
                 char: getAdjacentKey(char, rng),
+                kind: 'mistake-output',
+                mistakeType: 'key',
                 delay: baseDelay,
                 distributionWeight: 0.8
             });
