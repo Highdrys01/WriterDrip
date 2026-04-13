@@ -659,7 +659,7 @@ async function validatePlanner() {
     const richMistakeText = [
         'I am in a hurry, but I still want the typing engine to feel varied, a little sloppy, and self-correcting.',
         'Because the draft is long enough, it should sometimes miss a comma, drop a space, repeat a word, or skip a small word before fixing itself.',
-        'I am going to the store, and I am also trying to see whether sentence starts, the letter I, and punctuation slips get corrected later.'
+        'I am going to the store, and I am also trying to see whether sentence starts, the letter I, punctuation slips, and contractions like don\'t, it\'s, I\'m, and we\'re or hyphenated words like long-term get corrected later.'
     ].join(' ');
     const mistakeTypeCounts = new Map();
     let repairSlipOutputCount = 0;
@@ -677,6 +677,7 @@ async function validatePlanner() {
 
     assert.ok((mistakeTypeCounts.get('punct-omit') || 0) > 0, 'High-intensity prose should allow omitted punctuation that is corrected later.');
     assert.ok((mistakeTypeCounts.get('space-before-punct') || 0) > 0, 'High-intensity prose should allow stray spaces before punctuation that are corrected later.');
+    assert.ok(((mistakeTypeCounts.get('apostrophe-omit') || 0) + (mistakeTypeCounts.get('hyphen-omit') || 0)) > 0, 'High-intensity prose should allow missed joiners like apostrophes or hyphens that are corrected later.');
     assert.ok(((mistakeTypeCounts.get('space-omit') || 0) + (mistakeTypeCounts.get('double-space') || 0)) > 0, 'High-intensity prose should allow spacing mistakes that are corrected later.');
     assert.ok((mistakeTypeCounts.get('repeat-word') || 0) > 0, 'High-intensity prose should allow repeated-word mistakes that are corrected later.');
     assert.ok((mistakeTypeCounts.get('small-word-skip') || 0) > 0, 'High-intensity prose should allow skipped small-word mistakes that are corrected later.');
