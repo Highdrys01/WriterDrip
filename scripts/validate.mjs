@@ -483,7 +483,7 @@ async function validatePlanner() {
     assert.ok(balancedMediumDuration.recommendedDurationMins < balancedHighDuration.recommendedDurationMins, 'Balanced prose should recommend more time for high than medium correction intensity.');
 
     const longDraftAnalysis = shared.analyzeDraftText(scenarios[1].text, scenarios[1].durationMins);
-    assert.equal(longDraftAnalysis.suggestedCorrectionIntensity, 'high', 'Long relaxed prose should suggest high correction intensity.');
+    assert.equal(longDraftAnalysis.suggestedCorrectionIntensity, 'medium', 'Long relaxed prose should stay below explicit high when suggested mode is being conservative.');
     assert.ok(longDraftAnalysis.suggestedCorrectionSignals.length > 0, 'Suggested intensity should include explanation signals for longer prose.');
     assert.ok(longDraftAnalysis.suggestedCorrectionNormalizedScore > balancedDraftAnalysis.suggestedCorrectionNormalizedScore, 'Long relaxed prose should score higher on the adaptive suggested scale than balanced prose.');
     assert.ok(longDraftAnalysis.recommendedDurationMins > longDraftAnalysis.minimumDurationMins, 'Long prose should recommend more time than the hard minimum.');

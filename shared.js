@@ -315,13 +315,13 @@
 
         if (roomyPacingScore > 0) {
             reward(
-                0.84 * roomyPacingScore,
+                0.56 * roomyPacingScore,
                 'The selected duration leaves enough pacing headroom for clean recoveries.'
             );
         }
         if (roomyPacingScore >= 0.7) {
             reward(
-                0.38 * clamp(roomyPacingScore - 0.44, 0, 1.05),
+                0.18 * clamp(roomyPacingScore - 0.44, 0, 1.05),
                 'The session is relaxed enough to support stronger correction spacing.'
             );
         }
@@ -368,13 +368,21 @@
             score += Math.min(0.42, longDraftLoad * 0.34);
         }
 
+        const normalizedScore = normalizeSuggestedCorrectionScore(score, metrics);
         let intensity = 'medium';
-        if (score >= 2.45) {
+        if (metrics.looksStructured) {
+            intensity = normalizedScore <= 0.22 ? 'low' : 'medium';
+        } else if (
+            normalizedScore >= 0.9 ||
+            (normalizedScore >= 0.82 &&
+                metrics.wordCount >= 180 &&
+                metrics.paragraphCount >= 2 &&
+                metrics.averageSentenceWordCount >= 10)
+        ) {
             intensity = 'high';
-        } else if (score <= 0.25) {
+        } else if (normalizedScore <= 0.16) {
             intensity = 'low';
         }
-        const normalizedScore = normalizeSuggestedCorrectionScore(score, metrics);
         const label = buildAdaptiveCorrectionLabel(normalizedScore, metrics);
 
         return {
@@ -547,15 +555,15 @@
     }
 
     function normalizeSuggestedCorrectionScore(score, metrics) {
-        let normalized = clamp((Number(score) + 1.1) / 4.6, 0, 1);
+        let normalized = clamp((Number(score) + 0.7) / 5.4, 0, 1);
         if (metrics?.looksStructured) {
-            normalized *= 0.82;
+            normalized *= 0.78;
         }
         if ((metrics?.paragraphCount || 0) >= 3 && (metrics?.wordCount || 0) >= 120) {
-            normalized = Math.max(normalized, 0.56);
+            normalized = Math.max(normalized, 0.46);
         }
         if ((metrics?.wordCount || 0) >= 220 && !metrics?.looksStructured) {
-            normalized = Math.max(normalized, 0.68);
+            normalized = Math.max(normalized, 0.6);
         }
         return clamp(normalized, 0, 1);
     }
@@ -576,7 +584,7 @@
         if (normalizedScore < 0.68) {
             return 'Active';
         }
-        if (normalizedScore < 0.84) {
+        if (normalizedScore < 0.9) {
             return 'Dense';
         }
         return 'Intense';

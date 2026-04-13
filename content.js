@@ -343,43 +343,43 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             wordVariantDelayScale: 1.02
         },
         high: {
-            chanceScale: 2.85,
-            budgetScale: 2.2,
-            budgetOffset: 1.4,
-            cooldownScale: 0.42,
+            chanceScale: 3.45,
+            budgetScale: 2.75,
+            budgetOffset: 2.2,
+            cooldownScale: 0.3,
             immediateRepairOffset: -0.15,
             wordBoundaryOffset: -0.12,
-            repairDepthScale: 1.6,
+            repairDepthScale: 1.84,
             noticePauseScale: 1.24,
             realignPauseScale: 1.16,
-            transpositionScale: 1.36,
-            doubleTapScale: 1.3,
-            casingScale: 1.28,
-            omissionScale: 1.42,
-            spacingOmissionScale: 1.42,
-            doubleSpaceScale: 1.34,
-            punctuationOmissionScale: 1.42,
-            punctuationSpacingScale: 1.26,
-            punctuationSubstitutionScale: 1.42,
-            multiPunctuationScale: 1.34,
-            repeatWordScale: 1.36,
-            smallWordSkipScale: 1.14,
-            spacingScale: 0.62,
-            segmentBias: 2,
-            sentenceAllowanceBonus: 2,
-            wordVariantScale: 1.85,
-            maxWordVariantScale: 2.4,
+            transpositionScale: 1.44,
+            doubleTapScale: 1.4,
+            casingScale: 1.36,
+            omissionScale: 1.56,
+            spacingOmissionScale: 1.58,
+            doubleSpaceScale: 1.46,
+            punctuationOmissionScale: 1.56,
+            punctuationSpacingScale: 1.38,
+            punctuationSubstitutionScale: 1.62,
+            multiPunctuationScale: 1.52,
+            repeatWordScale: 1.54,
+            smallWordSkipScale: 1.28,
+            spacingScale: 0.54,
+            segmentBias: 3,
+            sentenceAllowanceBonus: 3,
+            wordVariantScale: 2.2,
+            maxWordVariantScale: 2.9,
             variantMinWordCount: 18,
             variantMinChars: 180,
-            keyboardSlipScale: 1.26,
-            vowelSlipScale: 1.7,
-            softSlipScale: 1.18,
+            keyboardSlipScale: 1.44,
+            vowelSlipScale: 1.92,
+            softSlipScale: 1.28,
             guaranteedMinChars: 95,
-            repairMessinessScale: 1.78,
-            repairAfterExtraScale: 1.62,
-            repairHardExtraScale: 1.72,
-            lingeringRepairScale: 1,
-            sentenceCarryScale: 0.34,
+            repairMessinessScale: 2.1,
+            repairAfterExtraScale: 1.78,
+            repairHardExtraScale: 1.96,
+            lingeringRepairScale: 1.18,
+            sentenceCarryScale: 0.46,
             wordVariantDelayScale: 1.48
         }
     };
@@ -1905,7 +1905,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         const explicitSelectionBias = requestedIntensity === 'suggested'
             ? 1
             : requestedIntensity === 'high'
-                ? 1.22
+                ? 1.36
                 : requestedIntensity === 'low'
                     ? 0.82
                     : 1.04;
@@ -1961,13 +1961,13 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         }
         if (requestedIntensity === 'high' && !looksStructured) {
             if (charCount >= 180 && wordCount >= 28) {
-                maxMistakes = Math.max(maxMistakes, 4);
+                maxMistakes = Math.max(maxMistakes, 5);
             }
             if (charCount >= 520 && wordCount >= 85) {
-                maxMistakes = Math.max(maxMistakes, 6);
+                maxMistakes = Math.max(maxMistakes, 8);
             }
             if (charCount >= 1200 && wordCount >= 190) {
-                maxMistakes = Math.max(maxMistakes, 8);
+                maxMistakes = Math.max(maxMistakes, 11);
             }
         }
         if (requestedIntensity === 'low') {
@@ -1976,7 +1976,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             }
             maxMistakes = Math.min(maxMistakes, charCount >= 520 ? 2 : 1);
         }
-        maxMistakes = clamp(maxMistakes, 0, Math.round(interpolateIntensityValue(2, 6, 14, intensityBlend)));
+        maxMistakes = clamp(maxMistakes, 0, Math.round(interpolateIntensityValue(2, 6, 18, intensityBlend)));
 
         const baseMistakeChance = PROFILE.mistakeChance *
             paceFactor *
@@ -3120,14 +3120,25 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
 
     function planPunctuationMistake(index, rng, baseDelay, context, draftProfile) {
         const weights = [];
+        const clausePunctuation = context.char === ',' || context.char === ';' || context.char === ':';
+        const sentencePunctuation = context.char === '.' || context.char === '!' || context.char === '?';
         if (draftProfile.punctuationOmissionChance > 0) {
-            weights.push({ type: 'punct-omit', weight: draftProfile.punctuationOmissionChance });
+            weights.push({
+                type: 'punct-omit',
+                weight: draftProfile.punctuationOmissionChance * (sentencePunctuation ? 1.12 : 0.92)
+            });
         }
         if (draftProfile.punctuationSpacingChance > 0) {
-            weights.push({ type: 'space-before-punct', weight: draftProfile.punctuationSpacingChance });
+            weights.push({
+                type: 'space-before-punct',
+                weight: draftProfile.punctuationSpacingChance * (clausePunctuation ? 1.9 : 0.7)
+            });
         }
         if (context.substitutionTargets?.length && draftProfile.punctuationSubstitutionChance > 0) {
-            weights.push({ type: 'punct-substitute', weight: draftProfile.punctuationSubstitutionChance });
+            weights.push({
+                type: 'punct-substitute',
+                weight: draftProfile.punctuationSubstitutionChance * (context.char === ',' || context.char === '.' ? 1.28 : 0.96)
+            });
         }
         if (context.canBurst && draftProfile.multiPunctuationChance > 0) {
             weights.push({ type: 'multi-punct', weight: draftProfile.multiPunctuationChance });
