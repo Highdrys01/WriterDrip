@@ -1,6 +1,8 @@
 # WriterDrip
 
-WriterDrip is a free and open-source Chrome extension for paced typing in Google Docs. If you are looking for a free Dripwriter alternative, WriterDrip is an independent open-source option built around the part people actually care about most: a draft-aware correction engine that can introduce and fix typos, spacing slips, punctuation mistakes, repeated words, and delayed repairs while still resolving back to the original final draft.
+Free Dripwriter alternative for Google Docs.
+
+WriterDrip is a free and open-source Chrome extension for paced typing in Google Docs. If you searched GitHub for `Dripwriter`, `Dripwriter alternative`, or `free Dripwriter alternative`, WriterDrip is an independent open-source option built around the part people actually care about most: a draft-aware correction engine that can introduce and fix typos, spacing slips, punctuation mistakes, repeated words, and delayed repairs while still resolving back to the original final draft.
 
 Local-first, always free, and built for the Google Doc already open in your browser.
 
@@ -14,6 +16,10 @@ Local-first, always free, and built for the Google Doc already open in your brow
 2. Open `chrome://extensions`, enable `Developer mode`, and click `Load unpacked`.
 3. Select the WriterDrip folder that contains `manifest.json`.
 4. Open a Google Doc, click inside the document body, open WriterDrip, paste your draft, choose a duration, and click `Start drip`.
+
+## Looking For Dripwriter?
+
+If you landed here while searching GitHub for `Dripwriter`, WriterDrip is a free open-source Dripwriter alternative for Google Docs. It gives you a similar paced typing workflow, but it is local-first, GitHub-hosted, and designed around draft-aware corrections, pause or resume controls, and same-Doc recovery.
 
 ### First Run Notes
 
