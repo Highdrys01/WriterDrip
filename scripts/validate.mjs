@@ -488,7 +488,7 @@ async function validatePlanner() {
     assert.ok(longDraftAnalysis.suggestedCorrectionNormalizedScore > balancedDraftAnalysis.suggestedCorrectionNormalizedScore, 'Long relaxed prose should score higher on the adaptive suggested scale than balanced prose.');
     assert.ok(longDraftAnalysis.recommendedDurationMins > longDraftAnalysis.minimumDurationMins, 'Long prose should recommend more time than the hard minimum.');
     assert.match(longDraftAnalysis.recommendedDurationReason, /recommended|room|pacing|corrections/i, 'Recommended duration should explain why extra headroom helps the draft.');
-    const longTightSuggested = shared.analyzeDraftText(scenarios[1].text, { durationMins: 5, correctionIntensity: 'suggested' });
+    const longTightSuggested = shared.analyzeDraftText(scenarios[1].text, { durationMins: 2, correctionIntensity: 'suggested' });
     assert.ok(longTightSuggested.suggestedCorrectionNormalizedScore < longDraftAnalysis.suggestedCorrectionNormalizedScore, 'The same long draft should get a lighter adaptive suggested score when the chosen duration is much tighter.');
     const longLowDuration = shared.analyzeDraftText(scenarios[1].text, { durationMins: scenarios[1].durationMins, correctionIntensity: 'low' });
     const longMediumDuration = shared.analyzeDraftText(scenarios[1].text, { durationMins: scenarios[1].durationMins, correctionIntensity: 'medium' });
@@ -545,6 +545,32 @@ async function validatePlanner() {
     }
 
     assert.ok(sampledMistakeTypes.get('key') > 0, 'High-intensity selection should still leave room for keyboard-neighbor slips.');
+
+    function sampleMistakeTypeCounts(currentChar, nextChar = 'r') {
+        const counts = new Map();
+        for (let seed = 1; seed <= 400; seed += 1) {
+            const type = hooks.selectMistakeType(() => {
+                let value = seed * 9301 + 49297;
+                value %= 233280;
+                return value / 233280;
+            }, highProfile, {
+                char: currentChar,
+                wordLength: 6,
+                offsetInWord: 2,
+                remainingInWord: 3,
+                canCaseMistake: true,
+                canLetterMistake: true,
+                isSentenceStart: false,
+                isStandaloneI: false
+            }, currentChar, nextChar, { recentTypes: [], segmentCounts: [], sentenceCounts: new Map(), sentenceIds: [], lastMistakeIndex: -Infinity, wordVariantCount: 0 });
+            counts.set(type, (counts.get(type) || 0) + 1);
+        }
+        return counts;
+    }
+
+    const vowelCounts = sampleMistakeTypeCounts('e');
+    const stableHomeRowCounts = sampleMistakeTypeCounts('g');
+    assert.ok((vowelCounts.get('omit') || 0) > (stableHomeRowCounts.get('omit') || 0), 'Frequent vowels should bias omission mistakes more than stable home-row letters.');
 
     const intensityAverages = {
         low: { repairs: 0, variants: 0, backspaces: 0 },

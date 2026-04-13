@@ -122,7 +122,8 @@
         const averageWordLength = wordCount ? totalWordLength / wordCount : 0;
         const letterCount = letters.length;
         const uppercaseCount = uppercase.length;
-        const punctuationRatio = punctuation.length / Math.max(1, charCount);
+        const punctuationCount = punctuation.length;
+        const punctuationRatio = punctuationCount / Math.max(1, charCount);
         const newlineRatio = newlines.length / Math.max(1, charCount);
         const uppercaseRatio = uppercaseCount / Math.max(1, letterCount);
         const symbolRatio = symbols.length / Math.max(1, charCount);
@@ -159,6 +160,7 @@
             letterCount,
             uppercaseCount,
             averageWordLength,
+            punctuationCount,
             punctuationRatio,
             newlineRatio,
             uppercaseRatio,
@@ -243,6 +245,34 @@
             }
         }
 
+        const punctuationPerSentence = metrics.punctuationCount / Math.max(1, metrics.sentenceCount || 1);
+        const wordsPerParagraph = metrics.paragraphCount
+            ? metrics.wordCount / Math.max(1, metrics.paragraphCount)
+            : metrics.wordCount;
+        const paragraphDensity = clamp((wordsPerParagraph - 55) / 75, 0, 1.5);
+        const sentenceDensity = clamp((metrics.averageSentenceWordCount - 11) / 8, 0, 1.6);
+        const maturityFactor = clamp((metrics.wordCount - 18) / 72, 0, 1.1);
+        const longDraftLoad = clamp((metrics.wordCount - 90) / 170, 0, 1.6);
+        const revisionOpportunityScore = clamp(
+            (metrics.sentenceCount * 0.14) +
+            (Math.max(0, metrics.paragraphCount - 1) * 0.26) +
+            (punctuationPerSentence * 0.34),
+            0,
+            3.8
+        );
+        const compositionComfortWpm = clamp(
+            42 -
+            (sentenceDensity * 4.8) -
+            (paragraphDensity * 4.2) -
+            (longDraftLoad * 3.6) -
+            (metrics.looksStructured ? -1.6 : 0),
+            19,
+            44
+        );
+        const roomyPacingScore = clamp((compositionComfortWpm - metrics.effectiveWpm) / 9, 0, 1.45) * Math.max(0.2, maturityFactor);
+        const tightPacingScore = clamp((metrics.effectiveWpm - compositionComfortWpm) / 8.5, 0, 1.65);
+        const veryTightPacingScore = clamp((metrics.effectiveWpm - (compositionComfortWpm + 7)) / 7.5, 0, 1.4);
+
         if (metrics.looksStructured) {
             caution(2.9, 'The draft looks structured or technical.');
         }
@@ -258,8 +288,20 @@
         if (metrics.wordCount >= 55) {
             reward(0.8, 'There is enough prose to space corrections out.');
         }
+        if (revisionOpportunityScore >= 1.45) {
+            reward(
+                Math.min(1.05, revisionOpportunityScore * 0.24),
+                'Sentence and paragraph structure give the draft more natural correction opportunities.'
+            );
+        }
         if (metrics.paragraphCount >= 3) {
             reward(0.45, 'Multiple paragraphs give the run more breathing room.');
+        }
+        if (paragraphDensity >= 0.32) {
+            reward(
+                Math.min(0.72, paragraphDensity * 0.42),
+                'Longer paragraphs make the draft read like sustained prose instead of short fragments.'
+            );
         }
         if (metrics.sentenceCount >= 6 && metrics.averageSentenceWordCount >= 8) {
             reward(0.5, 'The draft reads like full prose rather than short fragments.');
@@ -271,19 +313,15 @@
             reward(0.18, 'The draft has enough longer words to support occasional recoverable corrections.');
         }
 
-        const relaxedPacingScore = clamp((24 - metrics.effectiveWpm) / 10, 0, 1.35);
-        const veryRelaxedPacingScore = clamp((16 - metrics.effectiveWpm) / 6, 0, 1.2);
-        const tightPacingScore = clamp((metrics.effectiveWpm - 24) / 12, 0, 1.5);
-        const veryTightPacingScore = clamp((metrics.effectiveWpm - 34) / 10, 0, 1.5);
-        if (relaxedPacingScore > 0) {
+        if (roomyPacingScore > 0) {
             reward(
-                0.72 * relaxedPacingScore,
+                0.84 * roomyPacingScore,
                 'The selected duration leaves enough pacing headroom for clean recoveries.'
             );
         }
-        if (veryRelaxedPacingScore > 0) {
+        if (roomyPacingScore >= 0.7) {
             reward(
-                0.46 * veryRelaxedPacingScore,
+                0.38 * clamp(roomyPacingScore - 0.44, 0, 1.05),
                 'The session is relaxed enough to support stronger correction spacing.'
             );
         }
@@ -295,7 +333,7 @@
         }
         if (veryTightPacingScore > 0) {
             caution(
-                0.78 * veryTightPacingScore,
+                0.92 * veryTightPacingScore,
                 'The draft would need to move very quickly at this duration.'
             );
         }
@@ -324,6 +362,10 @@
         }
         if (metrics.uniqueWordRatio < 0.36 && metrics.wordCount >= 28) {
             caution(0.35, 'The wording is repetitive enough that stronger corrections would stand out more.');
+        }
+
+        if (metrics.wordCount >= 140 && !metrics.looksStructured) {
+            score += Math.min(0.42, longDraftLoad * 0.34);
         }
 
         let intensity = 'medium';
@@ -379,15 +421,38 @@
             : intensityBlend < 0.68
                 ? 'medium'
                 : 'high';
-        const punctuationCount = Math.round(metrics.punctuationRatio * metrics.charCount);
+        const punctuationCount = Number.isFinite(metrics.punctuationCount)
+            ? metrics.punctuationCount
+            : Math.round(metrics.punctuationRatio * metrics.charCount);
         const wordsPerParagraph = metrics.paragraphCount
             ? metrics.wordCount / Math.max(1, metrics.paragraphCount)
             : metrics.wordCount;
         const paragraphDensity = clamp((wordsPerParagraph - 55) / 70, 0, 1.45);
         const sentenceDensity = clamp((metrics.averageSentenceWordCount - 11) / 9, 0, 1.5);
         const longDraftLoad = clamp((metrics.wordCount - 80) / 180, 0, 1.7);
+        const punctuationPerSentence = punctuationCount / Math.max(1, metrics.sentenceCount || 1);
+        const revisionLoad = clamp(
+            (metrics.sentenceCount * 0.1) +
+            (Math.max(0, metrics.paragraphCount - 1) * 0.24) +
+            (punctuationPerSentence * 0.32),
+            0,
+            6.5
+        );
         const proseBias = metrics.looksStructured ? 0.86 : 1;
-        const targetWordsPerMinute = interpolateAdaptiveValue(53, 44, 36, intensityBlend);
+        const targetWordsPerMinute = clamp(
+            52 * (
+                1 - (
+                    0.16 +
+                    (sentenceDensity * 0.08) +
+                    (paragraphDensity * 0.075) +
+                    (longDraftLoad * 0.055) +
+                    (revisionLoad * 0.018) +
+                    (intensityBlend * 0.12)
+                )
+            ),
+            metrics.looksStructured ? 24 : 18,
+            metrics.looksStructured ? 46 : 42
+        );
         const baseTypingMins = (metrics.wordCount / Math.max(1, targetWordsPerMinute)) * proseBias;
         const paragraphMins = metrics.paragraphCount <= 1
             ? 0
@@ -398,6 +463,7 @@
         const longSentenceMins = sentenceDensity * Math.max(1, metrics.sentenceCount) *
             interpolateAdaptiveValue(0.08, 0.13, 0.2, intensityBlend);
         const punctuationMins = punctuationCount * interpolateAdaptiveValue(0.014, 0.022, 0.032, intensityBlend);
+        const revisionMins = revisionLoad * interpolateAdaptiveValue(0.22, 0.34, 0.52, intensityBlend);
         const longDraftMins = longDraftLoad * interpolateAdaptiveValue(1.7, 3.1, 4.8, intensityBlend);
         const correctionHeadroom = interpolateAdaptiveValue(1.05, 1.13, 1.22, intensityBlend);
         const baselineHeadroomMins = interpolateAdaptiveValue(0.35, 1.2, 2.25, intensityBlend);
@@ -409,6 +475,7 @@
             sentenceMins +
             longSentenceMins +
             punctuationMins +
+            revisionMins +
             longDraftMins
         ) * correctionHeadroom + baselineHeadroomMins;
 

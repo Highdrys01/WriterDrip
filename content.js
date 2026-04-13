@@ -116,6 +116,10 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         'though',
         'while'
     ]);
+    const HOME_ROW_STABLE_CHARS = new Set(['d', 'f', 'g', 'j', 'k']);
+    const HIGH_INSERTION_CHARS = new Set(['a', 'd', 'e', 'i']);
+    const HIGH_DELETION_CHARS = new Set(['a', 'e', 'i', 'o']);
+    const HIGH_SUBSTITUTION_CHARS = new Set(['a', 'e', 'i', 'o', 'n', 'r', 't', 's']);
     const VOWEL_SLIP_MAP = Object.freeze({
         a: 'eo',
         e: 'ai',
@@ -1848,6 +1852,14 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         const punctuationRatio = analysis.punctuationRatio;
         const newlineRatio = analysis.newlineRatio;
         const symbolRatio = analysis.symbolRatio;
+        const punctuationCount = Number.isFinite(analysis.punctuationCount)
+            ? analysis.punctuationCount
+            : Math.round(analysis.punctuationRatio * analysis.charCount);
+        const wordsPerParagraph = analysis.paragraphCount
+            ? analysis.wordCount / Math.max(1, analysis.paragraphCount)
+            : analysis.wordCount;
+        const paragraphDensity = clamp((wordsPerParagraph - 55) / 70, 0, 1.5);
+        const sentenceDensity = clamp((analysis.averageSentenceWordCount - 11) / 8, 0, 1.6);
         const looksStructured = analysis.looksStructured;
         const suggestionScore = Number.isFinite(analysis.suggestedCorrectionScore) ? analysis.suggestedCorrectionScore : 1;
         const normalizedSuggestedScore = Number.isFinite(analysis.suggestedCorrectionNormalizedScore)
@@ -1864,6 +1876,13 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         const resolvedIntensity = requestedIntensity === 'suggested'
             ? getResolvedIntensityFromBlend(intensityBlend)
             : requestedIntensity;
+        const revisionOpportunity = clamp(
+            (analysis.sentenceCount * interpolateIntensityValue(0.08, 0.16, 0.28, intensityBlend)) +
+            (Math.max(0, analysis.paragraphCount - 1) * interpolateIntensityValue(0.12, 0.24, 0.42, intensityBlend)) +
+            (punctuationCount * interpolateIntensityValue(0.008, 0.014, 0.022, intensityBlend)),
+            0,
+            10
+        );
         const intensityProfile = requestedIntensity === 'suggested'
             ? buildInterpolatedCorrectionProfile(intensityBlend)
             : (CORRECTION_MODIFIERS[resolvedIntensity] || CORRECTION_MODIFIERS.medium);
@@ -1879,6 +1898,14 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
                     ? 0.82
                     : 1.04;
         const combinedStrengthBias = clamp(suggestedStrengthBias * explicitSelectionBias, 0.72, 1.5);
+        const revisionCapacity = clamp(
+            0.9 +
+            (paragraphDensity * 0.18) +
+            (sentenceDensity * 0.16) +
+            Math.min(revisionOpportunity * 0.035, 0.26),
+            0.88,
+            1.46
+        );
 
         let maxMistakes = 0;
         if (charCount >= 90 && wordCount >= 18) {
@@ -1901,8 +1928,18 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         }
 
         maxMistakes = Math.round((maxMistakes * intensityProfile.budgetScale * combinedStrengthBias) + intensityProfile.budgetOffset);
+        maxMistakes += Math.round(revisionOpportunity * interpolateIntensityValue(0.08, 0.16, 0.28, intensityBlend));
         if (looksStructured) {
             maxMistakes = Math.min(maxMistakes, 1);
+        }
+        if (!looksStructured && analysis.sentenceCount >= 3) {
+            const sentenceDrivenFloor = Math.round(
+                Math.max(0, analysis.sentenceCount - 1) * interpolateIntensityValue(0.06, 0.15, 0.34, intensityBlend)
+            );
+            const paragraphDrivenFloor = Math.round(
+                Math.max(0, analysis.paragraphCount - 1) * interpolateIntensityValue(0.05, 0.16, 0.34, intensityBlend)
+            );
+            maxMistakes = Math.max(maxMistakes, sentenceDrivenFloor + paragraphDrivenFloor);
         }
         if (resolvedIntensity === 'medium' && charCount >= 260 && wordCount >= 42) {
             maxMistakes = Math.max(maxMistakes, 2);
@@ -1927,9 +1964,15 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             }
             maxMistakes = Math.min(maxMistakes, charCount >= 520 ? 2 : 1);
         }
-        maxMistakes = clamp(maxMistakes, 0, Math.round(interpolateIntensityValue(2, 5, 10, intensityBlend)));
+        maxMistakes = clamp(maxMistakes, 0, Math.round(interpolateIntensityValue(2, 6, 14, intensityBlend)));
 
-        const baseMistakeChance = PROFILE.mistakeChance * paceFactor * technicalGuard * proseFactor * intensityProfile.chanceScale * combinedStrengthBias;
+        const baseMistakeChance = PROFILE.mistakeChance *
+            paceFactor *
+            technicalGuard *
+            proseFactor *
+            intensityProfile.chanceScale *
+            combinedStrengthBias *
+            revisionCapacity;
         const cooldownChars = Math.round(
             PROFILE.cooldownChars *
             clamp(1.08 - ((paceFactor - 1) * 0.35) + ((technicalGuard - 0.8) * 0.2), 0.68, 1.18) *
@@ -3144,13 +3187,16 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         const canTranspose = isWordCharacter(nextChar);
         const canCaseSwap = Boolean(context?.canCaseMistake) && (currentChar !== currentChar.toLowerCase() || currentChar !== currentChar.toUpperCase());
         const loweredChar = String(currentChar || '').toLowerCase();
+        const insertionBias = getInsertionBias(loweredChar);
+        const deletionBias = getDeletionBias(loweredChar);
+        const substitutionBias = getSubstitutionBias(loweredChar);
         const weights = [];
 
         if (Boolean(context?.canLetterMistake) && canTranspose && draftProfile.transpositionChance > 0) {
             weights.push({ type: 'trans', weight: draftProfile.transpositionChance });
         }
         if (Boolean(context?.canLetterMistake) && draftProfile.doubleTapChance > 0) {
-            weights.push({ type: 'double', weight: draftProfile.doubleTapChance });
+            weights.push({ type: 'double', weight: draftProfile.doubleTapChance * insertionBias });
         }
         if (canCaseSwap && draftProfile.casingErrorChance > 0) {
             const caseWeight = draftProfile.casingErrorChance *
@@ -3158,16 +3204,16 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             weights.push({ type: 'case', weight: caseWeight });
         }
         if (Boolean(context?.canLetterMistake) && draftProfile.omissionChance > 0) {
-            weights.push({ type: 'omit', weight: draftProfile.omissionChance });
+            weights.push({ type: 'omit', weight: draftProfile.omissionChance * deletionBias });
         }
         if (Boolean(context?.canLetterMistake) && VOWEL_SLIP_MAP[loweredChar] && draftProfile.vowelSlipChance > 0) {
-            weights.push({ type: 'vowel', weight: draftProfile.vowelSlipChance });
+            weights.push({ type: 'vowel', weight: draftProfile.vowelSlipChance * clamp((deletionBias * 0.84) + 0.18, 0.7, 1.36) });
         }
         if (Boolean(context?.canLetterMistake) && SOFT_SLIP_MAP[loweredChar] && draftProfile.softSlipChance > 0) {
-            weights.push({ type: 'soft', weight: draftProfile.softSlipChance });
+            weights.push({ type: 'soft', weight: draftProfile.softSlipChance * clamp((substitutionBias * 0.82) + 0.16, 0.72, 1.28) });
         }
         if (Boolean(context?.canLetterMistake) && draftProfile.keyboardSlipChance > 0) {
-            weights.push({ type: 'key', weight: draftProfile.keyboardSlipChance });
+            weights.push({ type: 'key', weight: draftProfile.keyboardSlipChance * substitutionBias });
         }
 
         if (!weights.length) {
@@ -3648,6 +3694,54 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             }
         }
         return burst;
+    }
+
+    function getDeletionBias(char) {
+        if (!/[a-z]/.test(char || '')) {
+            return 1;
+        }
+
+        let bias = 1;
+        if (HIGH_DELETION_CHARS.has(char)) {
+            bias += 0.18;
+        }
+        if (HOME_ROW_STABLE_CHARS.has(char)) {
+            bias -= 0.16;
+        }
+        if (HIGH_SUBSTITUTION_CHARS.has(char)) {
+            bias += 0.04;
+        }
+        return clamp(bias, 0.68, 1.34);
+    }
+
+    function getInsertionBias(char) {
+        if (!/[a-z]/.test(char || '')) {
+            return 1;
+        }
+
+        let bias = 0.9;
+        if (HIGH_INSERTION_CHARS.has(char)) {
+            bias += 0.18;
+        }
+        if (HOME_ROW_STABLE_CHARS.has(char)) {
+            bias += 0.05;
+        }
+        return clamp(bias, 0.7, 1.24);
+    }
+
+    function getSubstitutionBias(char) {
+        if (!/[a-z]/.test(char || '')) {
+            return 1;
+        }
+
+        let bias = 0.94;
+        if (HIGH_SUBSTITUTION_CHARS.has(char)) {
+            bias += 0.16;
+        }
+        if (HOME_ROW_STABLE_CHARS.has(char)) {
+            bias -= 0.1;
+        }
+        return clamp(bias, 0.72, 1.28);
     }
 
     function buildRepairSlipChars(sourceChar, rng, channel = 'letter') {
