@@ -49,9 +49,20 @@
   </head>
   <body>
     <div class="page-shell">
+      <div class="site-header">
+        <a class="brand-mark" href="https://highdrys01.github.io/WriterDrip/">WriterDrip</a>
+        <nav class="site-nav" aria-label="Primary">
+          <a href="#why">Why it works</a>
+          <a href="#features">Features</a>
+          <a href="#install">Install</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+        <a class="site-header-link" href="https://github.com/Highdrys01/WriterDrip">GitHub</a>
+      </div>
+
       <header class="hero">
         <div class="hero-copy">
-          <p class="eyebrow">Free open-source Chrome extension for Google Docs</p>
+          <p class="eyebrow">Local-first Chrome extension for Google Docs</p>
           <h1>WriterDrip</h1>
           <p class="lede">
             WriterDrip types user-provided text into the Google Doc already open in your browser over
@@ -90,24 +101,58 @@
           </nav>
         </div>
         <div class="hero-visual">
-          <div class="hero-note hero-note-top">
-            <strong>Correction-first</strong>
-            <span>Built around typo depth, delayed fixes, and spacing behavior.</span>
+          <div class="hero-stack">
+            <img
+              class="hero-card hero-card-main"
+              src="assets/writerdrip-overview-card.png"
+              alt="WriterDrip popup showing the draft area inside the extension"
+              width="640"
+              height="748"
+            >
+            <img
+              class="hero-card hero-card-correction"
+              src="assets/writerdrip-correction-card.png"
+              alt="WriterDrip correction controls"
+              width="480"
+              height="357"
+            >
+            <img
+              class="hero-card hero-card-duration"
+              src="assets/writerdrip-duration-card.png"
+              alt="WriterDrip duration controls"
+              width="480"
+              height="488"
+            >
           </div>
-          <img
-            src="assets/writerdrip-overview-card.png"
-            alt="WriterDrip popup showing the draft area inside the extension"
-            width="640"
-            height="748"
-          >
-          <div class="hero-note hero-note-bottom">
-            <strong>Local and recoverable</strong>
-            <span>Runs against the Doc already open in your browser, with pause and resume controls.</span>
-          </div>
+          <p class="hero-caption">Three controls matter most in practice: the draft, the duration, and how active the correction engine should stay.</p>
         </div>
       </header>
 
       <main>
+        <section class="section process-strip">
+          <div class="section-copy">
+            <p class="section-label">The flow</p>
+            <h2>Simple setup, more nuanced output.</h2>
+          </div>
+          <div class="process-cards">
+            <article>
+              <span>01</span>
+              <h3>Paste the draft</h3>
+              <p>Use the exact text you want to send into the active Google Doc.</p>
+            </article>
+            <article>
+              <span>02</span>
+              <h3>Shape the timing</h3>
+              <p>Pick a duration that matches the draft instead of relying on one rigid pace.</p>
+            </article>
+            <article>
+              <span>03</span>
+              <h3>Let the run evolve</h3>
+              <p>WriterDrip handles corrections, pauses, interruptions, and same-Doc recovery while it runs.</p>
+            </article>
+          </div>
+        </section>
+
         <section class="section compare-callout">
           <div class="section-copy">
             <p class="section-label">Looking for Dripwriter?</p>
@@ -129,7 +174,7 @@
           </div>
         </section>
 
-        <section class="section research-grid" id="why">
+        <section class="section section-dark research-grid" id="why">
           <div class="section-copy">
             <p class="section-label">Why it feels better</p>
             <h2>Built around the parts people actually notice while text is appearing.</h2>
