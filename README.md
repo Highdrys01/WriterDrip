@@ -21,13 +21,26 @@ Local-first, always free, and built for the Google Doc already open in your brow
 
 If you landed here while searching GitHub for `Dripwriter`, WriterDrip is a free open-source Dripwriter alternative for Google Docs. It gives you a similar paced typing workflow, but it is local-first, GitHub-hosted, and designed around draft-aware corrections, pause or resume controls, and same-Doc recovery.
 
+## Trust Model
+
+WriterDrip competes on transparency instead of cloud lock-in:
+
+- No Google OAuth
+- No server-side typing jobs
+- No text upload
+- Open-source correction and pacing engine
+- Runs locally in your browser
+- Recovery-first checks before start, resume, and completion
+- Redacted debug reports that exclude draft text
+
 ### First Run Notes
 
 - WriterDrip only works on editable Google Docs pages.
 - Leave correction intensity on `Suggested` if you want the default behavior.
 - You can switch to other tabs while the original Google Doc tab keeps running.
 - You can pause a run and resume it later, including the next day, as long as WriterDrip can recover the same Google Doc.
-- Keep your browser open, keep the original Google Doc tab open, and keep your computer awake until the drip finishes.
+- Keep your browser open and keep the original Google Doc tab open. WriterDrip can ask Chrome to keep the system awake during active runs, but you can turn this off in the popup if you prefer normal battery or sleep behavior.
+- WriterDrip cannot run if the browser is closed, the computer shuts down, or the lid forces sleep.
 - If the Doc tab reloads or closes unexpectedly, reopen the same Google Doc and use `Resume` if WriterDrip offers it.
 - Reload the extension from `chrome://extensions` after pulling updates from GitHub.
 
@@ -35,8 +48,11 @@ If you landed here while searching GitHub for `Dripwriter`, WriterDrip is a free
 
 - Types into the Google Doc already open in your browser instead of dumping the whole draft at once
 - Uses a correction engine with typo variety, spacing slips, punctuation substitutions, repeated words, and delayed repairs
+- Shows a correction preview before start so you can see what `Suggested`, `Low`, `Medium`, and `High` mean for the current draft
 - Lets you keep `Suggested` on for draft-aware correction behavior or switch to `Low`, `Medium`, or `High`
 - Supports pause, resume, stop, and same-Doc recovery when a run gets interrupted
+- Uses optional Chrome keep-awake and tab discard protection during active runs so local drips are less likely to stall while you use other tabs
+- Shows a run summary after completion with correction counts, delayed repairs, pause counts, interruptions, and final completion-check status
 
 ## Feature Tour
 
@@ -69,8 +85,9 @@ If you landed here while searching GitHub for `Dripwriter`, WriterDrip is a free
 - Runs a preflight start check before typing so the current Doc, editor surface, and typing context are ready
 - Supports pause, resume, and stop controls
 - Keeps paused runs recoverable so you can reopen the same Google Doc later and continue from there
-- Shows a recovery wizard when the Doc tab reloads, sleeps, or loses the editor context
-- Records a completion check after each run so you can see whether the final editor state still looked clean
+- Shows a recovery wizard with confidence states like `Ready`, `Needs click in Doc`, `Doc changed`, or `Restart recommended`
+- Records a run summary and completion check after each run so you can see what happened without storing the draft body
+- Provides a `Copy debug report` action for failures with browser, extension, session, and Doc status metadata only
 - Binds each drip to the specific Google Doc tab where it started
 - Keeps active session state outside the popup so closing the popup does not immediately stop the run
 
@@ -116,6 +133,7 @@ If you landed here while searching GitHub for `Dripwriter`, WriterDrip is a free
 
 - WriterDrip does not send text to any server.
 - WriterDrip stores drafts, durations, and active session state locally with `chrome.storage.local`.
+- The keep-awake preference is stored locally and defaults to on. Turn off `Keep computer awake` in the popup if you do not want WriterDrip to request Chrome system keep-awake during active runs.
 - The extension only operates on the current page after the user invokes it.
 - This repository is an independent open-source project and is not affiliated with other typing products or services.
 

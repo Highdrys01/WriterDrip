@@ -64,8 +64,9 @@
           </div>
           <ul class="quick-points">
             <li>Works with the Google Doc already open in your browser</li>
+            <li>No OAuth, no server jobs, and no text upload</li>
             <li>Correction engine can vary typos, spacing, punctuation, repeated words, and repairs by draft</li>
-            <li>Pause, resume, stop, and recover the same run from the same Google Doc later</li>
+            <li>Correction preview, safe resume checks, run summaries, and redacted debug reports</li>
           </ul>
         </div>
         <div class="hero-visual">
@@ -86,9 +87,30 @@
             <p>
               If you searched for Dripwriter, WriterDrip gives you a similar paced typing workflow for
               Google Docs without a paywall, with a correction engine that focuses on typo variety,
-              delayed fixes, and same-Doc recovery. WriterDrip is an independent project and is not
-              affiliated with Dripwriter.
+              delayed fixes, and same-Doc recovery. Its biggest difference is trust: no Google OAuth,
+              no remote server, no hidden typing job, and no draft upload. WriterDrip is an independent
+              project and is not affiliated with Dripwriter.
             </p>
+          </div>
+        </section>
+
+        <section class="section trust-section" id="trust">
+          <div class="section-copy">
+            <p class="section-label">Trust-first design</p>
+            <h2>Open, local, and easier to audit.</h2>
+            <p>
+              WriterDrip is built around behavior users can inspect: the pacing logic, correction
+              estimates, recovery checks, completion summary, and debug report are all local and
+              visible in the repository.
+            </p>
+          </div>
+          <div class="trust-grid">
+            <article><strong>No OAuth</strong><span>Uses the Doc already open in your browser.</span></article>
+            <article><strong>No server</strong><span>No cloud worker or remote queue.</span></article>
+            <article><strong>No text upload</strong><span>Your draft stays in local browser storage.</span></article>
+            <article><strong>Open engine</strong><span>Correction behavior lives in readable source code.</span></article>
+            <article><strong>Safe resume</strong><span>Checks the Doc, editor, and typing context before continuing.</span></article>
+            <article><strong>Redacted reports</strong><span>Debug metadata excludes the draft body.</span></article>
           </div>
         </section>
 
@@ -98,8 +120,9 @@
               <p class="section-label">Correction engine</p>
               <h2>Built around the fix-up behavior people actually notice.</h2>
               <p>
-                WriterDrip can mix typo depth, spacing slips, punctuation substitutions, repeated
-                words, and delayed repairs while still resolving back to the original draft.
+                WriterDrip previews what each correction mode means for the current draft, then can
+                mix typo depth, spacing slips, punctuation substitutions, repeated words, and delayed
+                repairs while still resolving back to the original draft.
               </p>
             </div>
             <img
@@ -116,7 +139,8 @@
               <h2>Choose a session that fits the draft.</h2>
               <p>
                 Use the draft-sized minimum, type a custom duration, or jump to quick presets like
-                one hour, one day, or one week.
+                one hour, one day, or one week. After completion, the run summary shows timing,
+                corrections, delayed repairs, pauses, interruptions, and final check status.
               </p>
             </div>
             <img
@@ -169,15 +193,15 @@
             </article>
             <article>
               <h3>Does WriterDrip use my Google account?</h3>
-              <p>No. WriterDrip works against the Google Doc already open in your browser and does not require OAuth.</p>
+              <p>No. WriterDrip works against the Google Doc already open in your browser and does not require OAuth, Google Drive API access, or a server account.</p>
             </article>
             <article>
               <h3>Does it keep running if I switch tabs?</h3>
-              <p>Yes. WriterDrip stays bound to the original Google Doc tab while you use other tabs, as long as your browser and computer stay on.</p>
+              <p>Yes. WriterDrip stays bound to the original Google Doc tab while you use other tabs, and it can ask Chrome to keep the system awake during active runs. The popup includes a keep-awake toggle if you want normal battery or sleep behavior instead.</p>
             </article>
             <article>
               <h3>Does my laptop have to stay on?</h3>
-              <p>While a drip is actively running, yes. WriterDrip runs locally in your browser, so your computer must stay awake and the original Google Doc tab must stay open. If you need a break, pause the run and resume later from the same Google Doc.</p>
+              <p>WriterDrip is local-only, so the browser and original Google Doc tab must stay open. Keep-awake is optional and defaults on, but WriterDrip cannot continue if the computer shuts down, the browser closes, or the lid forces sleep.</p>
             </article>
             <article>
               <h3>Is WriterDrip free?</h3>
@@ -186,6 +210,10 @@
             <article>
               <h3>Does it control Google Docs version history?</h3>
               <p>No. WriterDrip types into the live editor, but Google still controls how revision history is grouped and displayed.</p>
+            </article>
+            <article>
+              <h3>What is in a debug report?</h3>
+              <p>Browser version, extension version, issue code, run state, and Doc status metadata. It does not include your draft text.</p>
             </article>
           </div>
         </section>

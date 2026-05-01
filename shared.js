@@ -9,8 +9,16 @@
 (function () {
     const MIN_DURATION_MINS = 1;
     const MAX_DURATION_MINS = 10080;
+    const KEEP_AWAKE_ENABLED_KEY = 'writerdripKeepAwakeEnabled';
     const CORRECTION_INTENSITIES = Object.freeze(['suggested', 'low', 'medium', 'high']);
     const CORRECTION_INTENSITY_SET = new Set(CORRECTION_INTENSITIES);
+    const RECOVERABLE_ATTENTION_CODES = Object.freeze([
+        'editor-not-ready',
+        'editor-focus-failed',
+        'manual-interaction',
+        'tab-suspended',
+        'typing-context-lost'
+    ]);
     const WORD_REGEX = /\p{L}+/gu;
     const LETTER_REGEX = /\p{L}/gu;
     const UPPERCASE_REGEX = /\p{Lu}/gu;
@@ -189,6 +197,11 @@
             recommendation,
             analyzeOptions.correctionIntensity
         );
+        const correctionPreview = buildCorrectionPreview(
+            analysis,
+            recommendation,
+            analyzeOptions.correctionIntensity
+        );
 
         return {
             ...analysis,
@@ -201,7 +214,8 @@
             requestedCorrectionIntensity: analyzeOptions.correctionIntensity,
             recommendedDurationIntensity: durationRecommendation.intensity,
             recommendedDurationMins: durationRecommendation.minutes,
-            recommendedDurationReason: durationRecommendation.reason
+            recommendedDurationReason: durationRecommendation.reason,
+            correctionPreview
         };
     }
 
@@ -410,25 +424,8 @@
         }
 
         const requestedIntensity = normalizeCorrectionIntensity(correctionIntensity);
-        const suggestedBlend = Number.isFinite(correctionRecommendation?.normalizedScore)
-            ? correctionRecommendation.normalizedScore
-            : (correctionRecommendation?.intensity === 'high'
-                ? 1
-                : correctionRecommendation?.intensity === 'low'
-                    ? 0
-                    : 0.5);
-        const intensityBlend = requestedIntensity === 'suggested'
-            ? clamp(suggestedBlend, 0, 1)
-            : requestedIntensity === 'high'
-                ? 1
-                : requestedIntensity === 'low'
-                    ? 0
-                    : 0.5;
-        const effectiveIntensity = intensityBlend < 0.34
-            ? 'low'
-            : intensityBlend < 0.68
-                ? 'medium'
-                : 'high';
+        const intensityBlend = getCorrectionIntensityBlend(requestedIntensity, correctionRecommendation);
+        const effectiveIntensity = getEffectiveIntensityFromBlend(intensityBlend);
         const punctuationCount = Number.isFinite(metrics.punctuationCount)
             ? metrics.punctuationCount
             : Math.round(metrics.punctuationRatio * metrics.charCount);
@@ -542,6 +539,229 @@
         };
     }
 
+    function buildCorrectionPreview(metrics, correctionRecommendation = null, selectedIntensity = 'suggested') {
+        const selected = normalizeCorrectionIntensity(selectedIntensity);
+        const modes = CORRECTION_INTENSITIES.map((mode) => buildCorrectionPreviewForMode(metrics, correctionRecommendation, mode));
+        const selectedMode = modes.find((mode) => mode.id === selected) || modes[0];
+        const suggestedMode = modes.find((mode) => mode.id === 'suggested') || selectedMode;
+
+        return {
+            selected,
+            selectedMode,
+            suggestedMode,
+            modes
+        };
+    }
+
+    function buildCorrectionPreviewForMode(metrics, correctionRecommendation = null, mode = 'suggested') {
+        const normalizedMode = normalizeCorrectionIntensity(mode);
+        const hasDraft = Boolean(metrics?.trimmed);
+        const intensityBlend = getCorrectionIntensityBlend(normalizedMode, correctionRecommendation);
+        const effectiveIntensity = normalizedMode === 'suggested'
+            ? getEffectiveIntensityFromBlend(intensityBlend)
+            : normalizedMode;
+        const adaptiveLabel = normalizedMode === 'suggested'
+            ? correctionRecommendation?.label || buildAdaptiveCorrectionLabel(intensityBlend, metrics)
+            : formatCorrectionIntensityLabel(effectiveIntensity);
+
+        if (!hasDraft) {
+            return {
+                id: normalizedMode,
+                label: normalizedMode === 'suggested' ? 'Suggested' : formatCorrectionIntensityLabel(normalizedMode),
+                effectiveIntensity,
+                adaptiveLabel,
+                estimatedRepairs: 0,
+                delayedRepairs: 0,
+                pauseMoments: 0,
+                wordLevelRepairs: 0,
+                punctuationRepairs: 0,
+                spacingRepairs: 0,
+                repairDepth: 'none',
+                pacingBehavior: 'Add a draft to preview this mode.',
+                summary: 'Add a draft to preview this mode.'
+            };
+        }
+
+        const wordsPerParagraph = metrics.paragraphCount
+            ? metrics.wordCount / Math.max(1, metrics.paragraphCount)
+            : metrics.wordCount;
+        const paragraphDensity = clamp((wordsPerParagraph - 45) / 95, 0, 1.5);
+        const sentenceDensity = clamp((metrics.averageSentenceWordCount - 9) / 10, 0, 1.55);
+        const longDraftLoad = clamp((metrics.wordCount - 70) / 180, 0, 1.8);
+        const punctuationOpportunity = clamp(metrics.punctuationCount / Math.max(1, metrics.sentenceCount || 1), 0, 5);
+        const structuredFactor = metrics.looksStructured
+            ? interpolateAdaptiveValue(0.48, 0.56, 0.64, intensityBlend)
+            : 1;
+        const opportunityScore = (
+            1.8 +
+            Math.sqrt(Math.max(0, metrics.wordCount)) * 0.54 +
+            (metrics.sentenceCount * 0.3) +
+            (Math.max(0, metrics.paragraphCount - 1) * 0.9) +
+            (punctuationOpportunity * 0.44)
+        ) * (1 + (paragraphDensity * 0.3) + (sentenceDensity * 0.25) + (longDraftLoad * 0.26)) * structuredFactor;
+        const intensityFactor = interpolateAdaptiveValue(0.22, 0.72, 1.55, intensityBlend);
+        const floor = getPreviewRepairFloor(metrics, effectiveIntensity, intensityBlend);
+        const cap = getPreviewRepairCap(metrics, effectiveIntensity, intensityBlend);
+        const estimatedRepairs = Math.min(cap, Math.max(floor, Math.round(opportunityScore * intensityFactor)));
+        const delayedRepairs = Math.min(
+            estimatedRepairs,
+            Math.max(
+                estimatedRepairs >= 3 && intensityBlend >= 0.68 ? 1 : 0,
+                Math.round(estimatedRepairs * (0.1 + (intensityBlend * 0.42) + (paragraphDensity * 0.08)))
+            )
+        );
+        const pauseMoments = Math.round(
+            (metrics.sentenceCount * interpolateAdaptiveValue(0.26, 0.4, 0.58, intensityBlend)) +
+            (Math.max(0, metrics.paragraphCount - 1) * interpolateAdaptiveValue(0.74, 1.18, 1.72, intensityBlend)) +
+            (estimatedRepairs * interpolateAdaptiveValue(0.38, 0.56, 0.78, intensityBlend))
+        );
+        const wordLevelRepairs = estimateWordLevelRepairs(metrics, estimatedRepairs, intensityBlend);
+        const punctuationRepairs = Math.min(
+            estimatedRepairs,
+            Math.round(metrics.punctuationCount * interpolateAdaptiveValue(0.024, 0.074, 0.16, intensityBlend))
+        );
+        const spacingRepairs = Math.min(
+            estimatedRepairs,
+            Math.round(Math.max(1, metrics.sentenceCount) * interpolateAdaptiveValue(0.055, 0.17, 0.34, intensityBlend))
+        );
+        const repairDepth = intensityBlend >= 0.86
+            ? 'intense'
+            : intensityBlend >= 0.68
+            ? 'deep'
+            : intensityBlend >= 0.42
+                ? 'balanced'
+                : 'light';
+        const pacingBehavior = buildPreviewPacingBehavior(effectiveIntensity, normalizedMode, delayedRepairs, metrics);
+
+        return {
+            id: normalizedMode,
+            label: normalizedMode === 'suggested' ? 'Suggested' : formatCorrectionIntensityLabel(normalizedMode),
+            effectiveIntensity,
+            adaptiveLabel,
+            estimatedRepairs,
+            delayedRepairs,
+            pauseMoments,
+            wordLevelRepairs,
+            punctuationRepairs,
+            spacingRepairs,
+            repairDepth,
+            pacingBehavior,
+            summary: buildPreviewSummary(estimatedRepairs, delayedRepairs, pauseMoments, pacingBehavior)
+        };
+    }
+
+    function getCorrectionIntensityBlend(correctionIntensity, correctionRecommendation = null) {
+        const requestedIntensity = normalizeCorrectionIntensity(correctionIntensity);
+        if (requestedIntensity === 'high') {
+            return 1;
+        }
+        if (requestedIntensity === 'low') {
+            return 0;
+        }
+        if (requestedIntensity === 'medium') {
+            return 0.5;
+        }
+
+        if (Number.isFinite(correctionRecommendation?.normalizedScore)) {
+            return clamp(correctionRecommendation.normalizedScore, 0, 1);
+        }
+        if (correctionRecommendation?.intensity === 'high') {
+            return 1;
+        }
+        if (correctionRecommendation?.intensity === 'low') {
+            return 0;
+        }
+        return 0.5;
+    }
+
+    function getEffectiveIntensityFromBlend(intensityBlend) {
+        if (intensityBlend < 0.34) {
+            return 'low';
+        }
+        if (intensityBlend < 0.68) {
+            return 'medium';
+        }
+        return 'high';
+    }
+
+    function getPreviewRepairFloor(metrics, effectiveIntensity, intensityBlend) {
+        if (!metrics?.wordCount || metrics.wordCount < 12) {
+            return 0;
+        }
+        if (effectiveIntensity === 'high') {
+            if (metrics.wordCount >= 140) {
+                return 6;
+            }
+            if (metrics.wordCount >= 70) {
+                return 4;
+            }
+            return metrics.wordCount >= 28 ? 3 : 1;
+        }
+        if (effectiveIntensity === 'medium') {
+            if (metrics.wordCount >= 120 && intensityBlend >= 0.42) {
+                return 3;
+            }
+            return metrics.wordCount >= 32 && intensityBlend >= 0.42 ? 1 : 0;
+        }
+        return 0;
+    }
+
+    function getPreviewRepairCap(metrics, effectiveIntensity, intensityBlend) {
+        const paragraphBonus = Math.max(0, (metrics?.paragraphCount || 0) - 1) * (effectiveIntensity === 'high' ? 3 : effectiveIntensity === 'medium' ? 2 : 1);
+        const sentenceBonus = Math.ceil((metrics?.sentenceCount || 0) * interpolateAdaptiveValue(0.12, 0.26, 0.48, intensityBlend));
+        const divisor = effectiveIntensity === 'high'
+            ? 4
+            : effectiveIntensity === 'medium'
+                ? 14
+                : 34;
+        return Math.max(
+            getPreviewRepairFloor(metrics, effectiveIntensity, intensityBlend),
+            Math.ceil((metrics?.wordCount || 0) / divisor) + paragraphBonus + sentenceBonus
+        );
+    }
+
+    function estimateWordLevelRepairs(metrics, estimatedRepairs, intensityBlend) {
+        if (intensityBlend < 0.42 || estimatedRepairs <= 0 || metrics.looksStructured) {
+            return 0;
+        }
+
+        const candidateScore = Math.max(0, Math.floor(metrics.wordCount / 65)) +
+            (metrics.longWordRatio >= 0.16 ? 1 : 0) +
+            (metrics.uniqueWordRatio >= 0.45 && metrics.wordCount >= 70 ? 1 : 0) +
+            (metrics.averageWordLength >= 5.2 ? 1 : 0);
+        const scaled = Math.round(candidateScore * interpolateAdaptiveValue(0, 0.86, 2.1, intensityBlend));
+        return Math.min(estimatedRepairs, Math.max(0, scaled));
+    }
+
+    function buildPreviewPacingBehavior(effectiveIntensity, mode, delayedRepairs, metrics) {
+        if (metrics.looksStructured && mode !== 'high') {
+            return 'careful spacing around structured text';
+        }
+        if (effectiveIntensity === 'high') {
+            return delayedRepairs > 0
+                ? 'intense repairs with later cleanup windows'
+                : 'intense repairs with deeper backtracking';
+        }
+        if (effectiveIntensity === 'low') {
+            return 'rare corrections with wider spacing';
+        }
+        return delayedRepairs > 0
+            ? 'balanced repairs with a few delayed cleanups'
+            : 'balanced repairs with steady pacing';
+    }
+
+    function buildPreviewSummary(estimatedRepairs, delayedRepairs, pauseMoments, pacingBehavior) {
+        const repairLabel = estimatedRepairs === 1 ? '1 repair' : `${estimatedRepairs} repairs`;
+        const delayedLabel = delayedRepairs === 1 ? '1 delayed' : `${delayedRepairs} delayed`;
+        const pauseLabel = pauseMoments === 1 ? '1 pause point' : `${pauseMoments} pause points`;
+        return `${repairLabel}, ${delayedLabel}, ${pauseLabel}; ${pacingBehavior}.`;
+    }
+
+    function formatCorrectionIntensityLabel(value) {
+        const normalized = normalizeCorrectionIntensity(value);
+        return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+    }
+
     function clamp(value, min, max) {
         return Math.min(max, Math.max(min, value));
     }
@@ -643,13 +863,16 @@
     globalThis.WriterDripShared = Object.freeze({
         MIN_DURATION_MINS,
         MAX_DURATION_MINS,
+        KEEP_AWAKE_ENABLED_KEY,
         CORRECTION_INTENSITIES,
+        RECOVERABLE_ATTENTION_CODES,
         normalizeCorrectionIntensity,
         sanitizeDraftText,
         estimateMinimumDurationSeconds,
         getMinimumDurationMins,
         normalizeDurationMins,
         analyzeDraftText,
-        suggestCorrectionIntensity
+        suggestCorrectionIntensity,
+        buildCorrectionPreview
     });
 }());

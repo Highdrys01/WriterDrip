@@ -15,6 +15,8 @@ if (!Shared) {
 
 const {
     MAX_DURATION_MINS,
+    KEEP_AWAKE_ENABLED_KEY,
+    RECOVERABLE_ATTENTION_CODES,
     normalizeCorrectionIntensity,
     sanitizeDraftText,
     getMinimumDurationMins,
@@ -23,6 +25,7 @@ const {
 
 const SESSIONS_KEY = 'writerdripTabSessions';
 const HEALTH_ALARM = 'writerdrip-health';
+const KEEP_AWAKE_LEVEL = 'system';
 const SESSION_STATES = {
     IDLE: 'idle',
     STARTING: 'starting',
@@ -53,11 +56,7 @@ const ISSUE_CODES = {
     UNSUPPORTED_PAGE: 'unsupported-page',
     WRONG_DOC: 'wrong-doc'
 };
-const SAFE_ATTENTION_RESUME_CODES = new Set([
-    ISSUE_CODES.EDITOR_NOT_READY,
-    ISSUE_CODES.EDITOR_FOCUS_FAILED,
-    ISSUE_CODES.TAB_SUSPENDED
-]);
+const SAFE_ATTENTION_RESUME_CODES = new Set(RECOVERABLE_ATTENTION_CODES);
 
 initialize().catch((error) => {
     console.error('[WriterDrip] Failed to initialize background worker.', error);
@@ -128,9 +127,22 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     });
 });
 
+chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local' || !changes[KEEP_AWAKE_ENABLED_KEY]) {
+        return;
+    }
+
+    readSessions()
+        .then((sessions) => safeSyncPowerKeepAwake(sessions))
+        .catch((error) => {
+            console.error('[WriterDrip] Failed to refresh keep-awake setting.', error);
+        });
+});
+
 let sessionLock = Promise.resolve();
 const indicatorCache = new Map();
 const discardProtectionCache = new Map();
+let powerKeepAwakeActive = false;
 
 async function initialize() {
     try {
@@ -143,6 +155,7 @@ async function initialize() {
     await syncHealthAlarm();
     await safeSyncActionIndicators(sessions);
     await safeSyncDiscardProtection(sessions);
+    await safeSyncPowerKeepAwake(sessions);
 }
 
 function withSessionLock(task) {
@@ -168,6 +181,13 @@ async function handleMessage(message, sender) {
                 ok: true,
                 report: await handleUiResumeConfidence(message.tabId, message.url || '')
             };
+        case 'ui:debug-report':
+            return {
+                ok: true,
+                report: await handleUiDebugReport(message.tabId, message.url || '', message.popup || null)
+            };
+        case 'ui:sync-settings':
+            return handleUiSyncSettings();
         case 'run:start':
             return handleRunStart(message.tabId, message.url || '', message.job);
         case 'runner:pause-toggle':
@@ -237,6 +257,9 @@ async function handleRunStart(tabId, url, rawJob) {
         session.attentionCode = null;
         session.lastCompletedJob = null;
         session.lastCompletedVerification = null;
+        session.lastRunSummary = null;
+        session.pauseCount = 0;
+        session.interruptionCount = 0;
         runPayload = {
             runId: session.activeRunId,
             job
@@ -283,6 +306,7 @@ async function handleRunStart(tabId, url, rawJob) {
             session.lastErrorCode = error.code || ISSUE_CODES.EDITOR_NOT_READY;
             session.attentionCode = error.code || ISSUE_CODES.EDITOR_NOT_READY;
             session.attentionMessage = getRecoveryHint(error.code || ISSUE_CODES.EDITOR_NOT_READY, 'Click inside the Google Doc and press Resume.');
+            session.interruptionCount = Math.max(0, session.interruptionCount || 0) + 1;
             session.updatedAt = Date.now();
             await writeSessions(sessions);
         });
@@ -386,6 +410,7 @@ async function handlePauseToggle(tabId) {
         nextSession.lastErrorCode = null;
         nextSession.attentionMessage = null;
         nextSession.attentionCode = null;
+        nextSession.pauseCount = Math.max(0, nextSession.pauseCount || 0) + 1;
         nextSession.lastHeartbeatAt = Date.now();
         nextSession.updatedAt = Date.now();
         await writeSessions(sessions);
@@ -422,6 +447,7 @@ async function handleStopCurrent(tabId) {
                     nextSession.lastError = error?.message || 'WriterDrip could not confirm that the active drip stopped.';
                     nextSession.attentionCode = error?.code || ISSUE_CODES.RUNTIME_ERROR;
                     nextSession.attentionMessage = 'WriterDrip could not confirm the drip stopped. Keep the Google Doc tab open and try Stop again.';
+                    nextSession.interruptionCount = Math.max(0, nextSession.interruptionCount || 0) + 1;
                     nextSession.updatedAt = Date.now();
                     await writeSessions(sessions);
                 });
@@ -464,8 +490,14 @@ async function handleRunnerProgress(tabId, payload) {
         }
 
         if (reachedCompletion) {
+            const verification = normalizeCompletionVerification(payload.verification);
             session.lastCompletedJob = summarizeJob(session.activeJob);
-            session.lastCompletedVerification = normalizeCompletionVerification(payload.verification);
+            session.lastCompletedVerification = verification;
+            session.lastRunSummary = buildRunSummary(session, {
+                runId: payload.runId,
+                stats: payload.stats,
+                verification
+            });
             resetActiveRun(session, SESSION_STATES.COMPLETE);
             session.progress = 1;
             session.eta = '00:00';
@@ -485,6 +517,9 @@ async function handleRunnerProgress(tabId, payload) {
         session.lastErrorCode = null;
         session.attentionMessage = null;
         session.attentionCode = null;
+        session.pauseReason = session.state === SESSION_STATES.PAUSED
+            ? normalizePauseReason(payload.pauseReason)
+            : null;
         await writeSessions(sessions);
     });
 
@@ -507,8 +542,14 @@ async function handleRunnerCompleted(tabId, payload) {
             return;
         }
 
+        const verification = normalizeCompletionVerification(payload.verification);
         session.lastCompletedJob = summarizeJob(session.activeJob);
-        session.lastCompletedVerification = normalizeCompletionVerification(payload.verification);
+        session.lastCompletedVerification = verification;
+        session.lastRunSummary = buildRunSummary(session, {
+            runId: payload.runId,
+            stats: payload.stats,
+            verification
+        });
         resetActiveRun(session, SESSION_STATES.COMPLETE);
         session.progress = 1;
         session.eta = '00:00';
@@ -537,6 +578,7 @@ async function handleRunnerError(tabId, payload) {
         session.lastErrorCode = payload.code || inferIssueCode(payload.message);
         session.attentionCode = payload.code || inferIssueCode(payload.message);
         session.attentionMessage = getRecoveryHint(payload.code || inferIssueCode(payload.message), payload.message || 'Click inside the editor and resume the active drip.');
+        session.interruptionCount = Math.max(0, session.interruptionCount || 0) + 1;
         session.lastHeartbeatAt = Date.now();
         session.updatedAt = Date.now();
         await writeSessions(sessions);
@@ -622,6 +664,7 @@ async function recoverSessionForTab(tabId, options = {}) {
             nextSession.lastErrorCode = error.code || inferIssueCode(error.message);
             nextSession.attentionCode = error.code || inferIssueCode(error.message);
             nextSession.attentionMessage = getRecoveryHint(error.code || inferIssueCode(error.message), 'Open the tab, click in the editor, and press Resume to continue.');
+            nextSession.interruptionCount = Math.max(0, nextSession.interruptionCount || 0) + 1;
             nextSession.updatedAt = Date.now();
             await writeSessions(sessions);
         });
@@ -749,7 +792,7 @@ async function runPreflightCheck(tabId, expectedDocKey) {
             code: null,
             message: response.message || 'WriterDrip is ready to start in this Google Doc.',
             checks: response.checks || [],
-            note: response.note || 'Keep the original Google Doc tab open, keep your browser open, and keep your computer awake until the drip finishes.'
+            note: response.note || 'Keep the original Google Doc tab and browser open. WriterDrip will ask Chrome to keep the system awake while the run is active.'
         });
     } catch (error) {
         return buildPreflightReport({
@@ -837,11 +880,7 @@ async function ensureRunnerInjected(tabId) {
         return;
     } catch (error) {
         try {
-            await chrome.scripting.executeScript({
-                target: { tabId },
-                files: ['shared.js', 'content.js']
-            });
-            await sleep(80);
+            await injectRunnerScripts(tabId);
             await sendMessageToTab(tabId, { type: 'writerdrip:query-status' });
         } catch (injectError) {
             throw createCodedError(inferIssueCode(injectError.message) || ISSUE_CODES.BACKGROUND_UNAVAILABLE, injectError.message || 'WriterDrip could not attach to this tab.');
@@ -863,6 +902,12 @@ async function sendRunnerCommand(tabId, payload) {
 async function sendRunnerMessageWithCompatibility(tabId, payload) {
     const response = await sendMessageToTab(tabId, payload);
     if (shouldRefreshRunnerFromResponse(response)) {
+        await injectRunnerScripts(tabId);
+        const refreshedResponse = await sendMessageToTab(tabId, payload);
+        if (!shouldRefreshRunnerFromResponse(refreshedResponse)) {
+            return refreshedResponse;
+        }
+
         return {
             status: 'error',
             code: ISSUE_CODES.EDITOR_NOT_READY,
@@ -870,6 +915,14 @@ async function sendRunnerMessageWithCompatibility(tabId, payload) {
         };
     }
     return response;
+}
+
+async function injectRunnerScripts(tabId) {
+    await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['shared.js', 'content.js']
+    });
+    await sleep(80);
 }
 
 function shouldRefreshRunnerFromResponse(response) {
@@ -943,6 +996,7 @@ async function writeSessions(sessions) {
     await chrome.storage.local.set({ [SESSIONS_KEY]: sessions });
     await safeSyncActionIndicators(sessions);
     await safeSyncDiscardProtection(sessions);
+    await safeSyncPowerKeepAwake(sessions);
 }
 
 function getSessionForTab(sessions, tabId) {
@@ -976,7 +1030,11 @@ function normalizeSession(tabId, rawSession) {
         attentionCode: rawSession.attentionCode || null,
         lastKnownUrl: rawSession.lastKnownUrl || '',
         lastCompletedJob: rawSession.lastCompletedJob || null,
-        lastCompletedVerification: normalizeCompletionVerification(rawSession.lastCompletedVerification)
+        lastCompletedVerification: normalizeCompletionVerification(rawSession.lastCompletedVerification),
+        lastRunSummary: normalizeRunSummary(rawSession.lastRunSummary),
+        pauseReason: normalizePauseReason(rawSession.pauseReason),
+        pauseCount: Math.max(0, rawSession.pauseCount || 0),
+        interruptionCount: Math.max(0, rawSession.interruptionCount || 0)
     };
 }
 
@@ -1006,6 +1064,7 @@ function resetActiveRun(session, nextState) {
     session.lastErrorCode = null;
     session.attentionMessage = null;
     session.attentionCode = null;
+    session.pauseReason = null;
 }
 
 function markSessionAwaitingTabReopen(session) {
@@ -1018,6 +1077,7 @@ function markSessionAwaitingTabReopen(session) {
     session.lastErrorCode = null;
     session.attentionCode = ISSUE_CODES.TAB_SUSPENDED;
     session.attentionMessage = 'The original Google Doc tab closed or reloaded. Reopen the same document and press Resume.';
+    session.interruptionCount = Math.max(0, session.interruptionCount || 0) + 1;
     session.updatedAt = Date.now();
     return true;
 }
@@ -1025,8 +1085,14 @@ function markSessionAwaitingTabReopen(session) {
 function applyRuntimeSnapshotToSession(session, runtime, options = {}) {
     const runtimeState = runtime?.state;
     if (runtimeState === SESSION_STATES.COMPLETE) {
+        const verification = normalizeCompletionVerification(runtime?.completionVerification) || session.lastCompletedVerification || null;
         session.lastCompletedJob = summarizeJob(session.activeJob);
-        session.lastCompletedVerification = normalizeCompletionVerification(runtime?.completionVerification) || session.lastCompletedVerification || null;
+        session.lastCompletedVerification = verification;
+        session.lastRunSummary = buildRunSummary(session, {
+            runId: session.activeRunId,
+            stats: runtime?.runStats || runtime?.stats,
+            verification
+        });
         resetActiveRun(session, SESSION_STATES.COMPLETE);
         session.progress = 1;
         session.eta = '00:00';
@@ -1049,6 +1115,9 @@ function applyRuntimeSnapshotToSession(session, runtime, options = {}) {
     session.lastErrorCode = null;
     session.attentionMessage = null;
     session.attentionCode = null;
+    session.pauseReason = runtimeState === SESSION_STATES.PAUSED
+        ? normalizePauseReason(runtime?.pauseReason)
+        : null;
 }
 
 async function getUiState(tabId, url = '') {
@@ -1087,7 +1156,45 @@ async function getUiState(tabId, url = '') {
         lastError: session.lastError,
         lastErrorCode: session.lastErrorCode,
         lastCompletedJob: session.lastCompletedJob,
-        lastCompletedVerification: session.lastCompletedVerification
+        lastCompletedVerification: session.lastCompletedVerification,
+        lastRunSummary: session.lastRunSummary,
+        pauseReason: session.pauseReason,
+        keepAwakeEnabled: await isKeepAwakeEnabled(),
+        keepAwakeRequested: powerKeepAwakeActive
+    };
+}
+
+async function handleUiDebugReport(tabId, url = '', popupContext = null) {
+    let session = normalizeSession(tabId || 0, {});
+    let tab = null;
+    const keepAwakeEnabled = await isKeepAwakeEnabled();
+
+    if (tabId) {
+        session = await getSessionSnapshot(tabId);
+        try {
+            tab = await chrome.tabs.get(tabId);
+        } catch (_error) {
+            tab = null;
+        }
+    }
+
+    return buildDebugReport({
+        tabId,
+        url,
+        tab,
+        session,
+        popupContext,
+        keepAwakeEnabled
+    });
+}
+
+async function handleUiSyncSettings() {
+    const sessions = await readSessions();
+    await safeSyncPowerKeepAwake(sessions);
+    return {
+        ok: true,
+        keepAwakeEnabled: await isKeepAwakeEnabled(),
+        keepAwakeRequested: powerKeepAwakeActive
     };
 }
 
@@ -1109,11 +1216,23 @@ function createJob(rawJob) {
         preset: rawJob?.preset || null,
         correctionIntensity,
         createdAt: Date.now(),
-        seed: Math.floor(Math.random() * 2147483647),
+        seed: createJobSeed(),
         wordCount: countWords(text),
         charCount: text.length,
         preview: buildPreview(text)
     };
+}
+
+function createJobSeed() {
+    const max = 2147483647;
+    try {
+        const bytes = new Uint32Array(2);
+        globalThis.crypto?.getRandomValues?.(bytes);
+        const mixed = (bytes[0] ^ bytes[1] ^ Date.now() ^ Math.floor(Math.random() * max)) >>> 0;
+        return (mixed % max) || 1;
+    } catch (_error) {
+        return (Math.floor((Math.random() * max) + Date.now()) % max) || 1;
+    }
 }
 
 function buildPreflightCheck(id, label, pass, detail) {
@@ -1180,6 +1299,115 @@ function normalizeCompletionVerification(rawVerification) {
                 detail: check.detail || ''
             }))
             : []
+    };
+}
+
+function normalizePauseReason(rawReason) {
+    if (!rawReason || typeof rawReason !== 'object') {
+        return null;
+    }
+
+    const code = String(rawReason.code || 'manual-pause').trim().toLowerCase();
+    const safeCode = /^[a-z0-9-]{1,48}$/.test(code) ? code : 'manual-pause';
+    return {
+        code: safeCode,
+        message: String(rawReason.message || 'Paused.').slice(0, 240)
+    };
+}
+
+function buildRunSummary(session, runtime = {}) {
+    const activeJob = session?.activeJob || null;
+    const completedJob = summarizeJob(activeJob) || session?.lastCompletedJob || null;
+    const stats = normalizeRunStats(runtime?.stats || runtime?.runStats || runtime?.actionStats);
+    const verification = normalizeCompletionVerification(runtime?.verification || runtime?.completionVerification) ||
+        session?.lastCompletedVerification ||
+        null;
+    const completedAt = Date.now();
+    const createdAt = Number(activeJob?.createdAt) || 0;
+    const elapsedSeconds = createdAt > 0
+        ? Math.max(0, Math.round((completedAt - createdAt) / 1000))
+        : Math.max(0, Math.round((Number(completedJob?.durationMins) || 0) * 60));
+
+    return normalizeRunSummary({
+        schemaVersion: 1,
+        runId: runtime?.runId || session?.activeRunId || null,
+        jobId: completedJob?.id || null,
+        completedAt,
+        plannedDurationMins: completedJob?.durationMins || 0,
+        elapsedSeconds,
+        wordCount: completedJob?.wordCount || 0,
+        charCount: completedJob?.charCount || 0,
+        correctionIntensity: normalizeCorrectionIntensity(completedJob?.correctionIntensity),
+        correctionsUsed: stats.correctionSequences,
+        delayedRepairs: stats.delayedRepairs,
+        pauseMoments: stats.pauseMoments,
+        userPauses: Math.max(stats.userPauses, session?.pauseCount || 0),
+        interruptions: Math.max(0, session?.interruptionCount || 0),
+        correctionBackspaces: stats.correctionBackspaces,
+        wordLevelRepairs: stats.wordLevelRepairs,
+        punctuationRepairs: stats.punctuationRepairs,
+        spacingRepairs: stats.spacingRepairs,
+        repairSlipOutputs: stats.repairSlipOutputs,
+        timerDriftAdjustments: stats.timerDriftAdjustments,
+        delayedBySeconds: stats.delayedBySeconds,
+        totalActions: stats.totalActions || session?.totalActions || 0,
+        deliveredActions: stats.deliveredActions || session?.checkpointActionIndex || 0,
+        completionCheckPassed: verification ? Boolean(verification.verified) : null
+    });
+}
+
+function normalizeRunSummary(rawSummary) {
+    if (!rawSummary || typeof rawSummary !== 'object') {
+        return null;
+    }
+
+    return {
+        schemaVersion: Math.max(1, Number(rawSummary.schemaVersion) || 1),
+        runId: rawSummary.runId || null,
+        jobId: rawSummary.jobId || null,
+        completedAt: Math.max(0, Number(rawSummary.completedAt) || 0),
+        plannedDurationMins: Math.max(0, Number(rawSummary.plannedDurationMins) || 0),
+        elapsedSeconds: Math.max(0, Number(rawSummary.elapsedSeconds) || 0),
+        wordCount: Math.max(0, Number(rawSummary.wordCount) || 0),
+        charCount: Math.max(0, Number(rawSummary.charCount) || 0),
+        correctionIntensity: normalizeCorrectionIntensity(rawSummary.correctionIntensity),
+        correctionsUsed: Math.max(0, Number(rawSummary.correctionsUsed) || 0),
+        delayedRepairs: Math.max(0, Number(rawSummary.delayedRepairs) || 0),
+        pauseMoments: Math.max(0, Number(rawSummary.pauseMoments) || 0),
+        userPauses: Math.max(0, Number(rawSummary.userPauses) || 0),
+        interruptions: Math.max(0, Number(rawSummary.interruptions) || 0),
+        correctionBackspaces: Math.max(0, Number(rawSummary.correctionBackspaces) || 0),
+        wordLevelRepairs: Math.max(0, Number(rawSummary.wordLevelRepairs) || 0),
+        punctuationRepairs: Math.max(0, Number(rawSummary.punctuationRepairs) || 0),
+        spacingRepairs: Math.max(0, Number(rawSummary.spacingRepairs) || 0),
+        repairSlipOutputs: Math.max(0, Number(rawSummary.repairSlipOutputs) || 0),
+        timerDriftAdjustments: Math.max(0, Number(rawSummary.timerDriftAdjustments) || 0),
+        delayedBySeconds: Math.max(0, Number(rawSummary.delayedBySeconds) || 0),
+        totalActions: Math.max(0, Number(rawSummary.totalActions) || 0),
+        deliveredActions: Math.max(0, Number(rawSummary.deliveredActions) || 0),
+        completionCheckPassed: typeof rawSummary.completionCheckPassed === 'boolean'
+            ? rawSummary.completionCheckPassed
+            : null
+    };
+}
+
+function normalizeRunStats(rawStats) {
+    const stats = rawStats && typeof rawStats === 'object' ? rawStats : {};
+    return {
+        totalActions: Math.max(0, Number(stats.totalActions) || 0),
+        deliveredActions: Math.max(0, Number(stats.deliveredActions) || 0),
+        correctionSequences: Math.max(0, Number(stats.correctionSequences) || 0),
+        delayedRepairs: Math.max(0, Number(stats.delayedRepairs) || 0),
+        pauseMoments: Math.max(0, Number(stats.pauseMoments) || 0),
+        correctionBackspaces: Math.max(0, Number(stats.correctionBackspaces) || 0),
+        repairSlipOutputs: Math.max(0, Number(stats.repairSlipOutputs) || 0),
+        mistakeOutputs: Math.max(0, Number(stats.mistakeOutputs) || 0),
+        wordLevelRepairs: Math.max(0, Number(stats.wordLevelRepairs) || 0),
+        punctuationRepairs: Math.max(0, Number(stats.punctuationRepairs) || 0),
+        spacingRepairs: Math.max(0, Number(stats.spacingRepairs) || 0),
+        userPauses: Math.max(0, Number(stats.userPauses) || 0),
+        timerDriftAdjustments: Math.max(0, Number(stats.timerDriftAdjustments) || 0),
+        delayedBySeconds: Math.max(0, Number(stats.delayedBySeconds) || 0)
     };
 }
 
@@ -1417,6 +1645,53 @@ async function safeSyncDiscardProtection(sessions) {
     }
 }
 
+async function safeSyncPowerKeepAwake(sessions) {
+    try {
+        await syncPowerKeepAwake(sessions);
+    } catch (error) {
+        console.warn('[WriterDrip] Could not refresh keep-awake protection.', error);
+    }
+}
+
+async function syncPowerKeepAwake(sessions) {
+    const keepAwakeEnabled = await isKeepAwakeEnabled();
+    const shouldKeepAwake = Object.values(sessions).some((session) => {
+        return Boolean(keepAwakeEnabled && session.activeJob && session.activeRunId && AUTO_RECOVERY_STATES.has(session.state));
+    });
+
+    if (shouldKeepAwake && !powerKeepAwakeActive) {
+        await requestSystemKeepAwake();
+        powerKeepAwakeActive = true;
+        return;
+    }
+
+    if (!shouldKeepAwake && powerKeepAwakeActive) {
+        await releaseSystemKeepAwake();
+        powerKeepAwakeActive = false;
+    }
+}
+
+async function isKeepAwakeEnabled() {
+    const result = await chrome.storage.local.get(KEEP_AWAKE_ENABLED_KEY);
+    return result[KEEP_AWAKE_ENABLED_KEY] !== false;
+}
+
+async function requestSystemKeepAwake() {
+    if (!chrome.power?.requestKeepAwake) {
+        return;
+    }
+
+    chrome.power.requestKeepAwake(KEEP_AWAKE_LEVEL);
+}
+
+async function releaseSystemKeepAwake() {
+    if (!chrome.power?.releaseKeepAwake) {
+        return;
+    }
+
+    chrome.power.releaseKeepAwake();
+}
+
 async function syncDiscardProtection(sessions) {
     const seenTabIds = new Set();
 
@@ -1497,6 +1772,197 @@ async function applyIndicatorState(tabId, nextState) {
     }
 }
 
+function buildDebugReport(context = {}) {
+    const session = normalizeSession(context.tabId || 0, context.session || {});
+    const tabUrl = context.tab?.url || context.url || session.lastKnownUrl || '';
+    const activeJob = session.activeJob || null;
+    const currentDocKey = extractGoogleDocKeyFromUrl(tabUrl);
+    const expectedDocKey = activeJob?.docKey || session.lastCompletedJob?.docKey || null;
+    const manifest = getExtensionManifest();
+    const generatedAtMs = Date.now();
+    const heartbeatAgeMs = session.lastHeartbeatAt
+        ? Math.max(0, generatedAtMs - session.lastHeartbeatAt)
+        : null;
+    const redactedPopupContext = redactPopupDebugContext(context.popupContext);
+    const issueCode = normalizeIssueCodeForReport(session.lastErrorCode || session.attentionCode || redactedPopupContext.issueCode);
+
+    return {
+        schemaVersion: 1,
+        generatedAt: new Date(generatedAtMs).toISOString(),
+        extension: {
+            name: manifest.name || 'WriterDrip',
+            version: manifest.version || 'unknown',
+            manifestVersion: manifest.manifest_version || 3
+        },
+        browser: {
+            userAgent: getUserAgent(),
+            version: parseBrowserVersion(getUserAgent())
+        },
+        tab: {
+            present: Boolean(context.tab),
+            idPresent: Boolean(context.tabId),
+            status: context.tab?.status || 'unknown',
+            discarded: Boolean(context.tab?.discarded),
+            autoDiscardable: typeof context.tab?.autoDiscardable === 'boolean' ? context.tab.autoDiscardable : null,
+            urlKind: classifyUrl(tabUrl),
+            docStatus: {
+                currentDocPresent: Boolean(currentDocKey),
+                expectedDocPresent: Boolean(expectedDocKey),
+                sameAsActiveJob: expectedDocKey ? currentDocKey === expectedDocKey : null
+            }
+        },
+        session: {
+            state: session.state,
+            progress: session.progress,
+            eta: session.eta,
+            hasActiveJob: Boolean(activeJob),
+            hasActiveRunId: Boolean(session.activeRunId),
+            issueCode,
+            attentionCode: session.attentionCode || null,
+            lastErrorCode: session.lastErrorCode || null,
+            pauseReasonCode: session.pauseReason?.code || null,
+            keepAwakeEnabled: Boolean(context.keepAwakeEnabled),
+            keepAwakeRequested: powerKeepAwakeActive,
+            checkpointActionIndex: session.checkpointActionIndex,
+            totalActions: session.totalActions,
+            pauseCount: session.pauseCount,
+            interruptionCount: session.interruptionCount,
+            updatedAt: session.updatedAt || null,
+            heartbeatAgeMs,
+            activeJob: activeJob ? {
+                durationMins: activeJob.durationMins,
+                preset: activeJob.preset || null,
+                correctionIntensity: normalizeCorrectionIntensity(activeJob.correctionIntensity),
+                wordCount: activeJob.wordCount || countWords(activeJob.text || ''),
+                charCount: activeJob.charCount || (activeJob.text ? activeJob.text.length : 0)
+            } : null,
+            lastCompleted: {
+                hasJob: Boolean(session.lastCompletedJob),
+                completionPassed: typeof session.lastCompletedVerification?.verified === 'boolean'
+                    ? session.lastCompletedVerification.verified
+                    : null,
+                hasRunSummary: Boolean(session.lastRunSummary)
+            },
+            lastRunSummary: session.lastRunSummary || null
+        },
+        popup: redactedPopupContext
+    };
+}
+
+function redactPopupDebugContext(context = null) {
+    if (!context || typeof context !== 'object') {
+        return {
+            pageKind: null,
+            selectedCorrectionIntensity: null,
+            durationValue: null,
+            issueCode: null,
+            keepAwakeEnabled: null,
+            draft: null,
+            preflight: null,
+            resume: null
+        };
+    }
+
+    return {
+        pageKind: normalizePageKindForReport(context.pageKind),
+        selectedCorrectionIntensity: context.selectedCorrectionIntensity
+            ? normalizeCorrectionIntensity(context.selectedCorrectionIntensity)
+            : null,
+        durationValue: Number.isFinite(Number(context.durationValue)) ? Number(context.durationValue) : null,
+        issueCode: normalizeIssueCodeForReport(context.issueCode),
+        keepAwakeEnabled: typeof context.keepAwakeEnabled === 'boolean' ? context.keepAwakeEnabled : null,
+        draft: context.draft && typeof context.draft === 'object' ? {
+            hasDraft: Boolean(context.draft.hasDraft),
+            wordCount: Math.max(0, Number(context.draft.wordCount) || 0),
+            charCount: Math.max(0, Number(context.draft.charCount) || 0),
+            minimumDurationMins: Math.max(0, Number(context.draft.minimumDurationMins) || 0),
+            recommendedDurationMins: Math.max(0, Number(context.draft.recommendedDurationMins) || 0)
+        } : null,
+        preflight: summarizeDiagnosticReport(context.preflight),
+        resume: summarizeDiagnosticReport(context.resume)
+    };
+}
+
+function summarizeDiagnosticReport(report) {
+    if (!report || typeof report !== 'object') {
+        return null;
+    }
+
+    return {
+        ready: typeof report.ready === 'boolean' ? report.ready : null,
+        canResume: typeof report.canResume === 'boolean' ? report.canResume : null,
+        confidence: report.confidence || null,
+        code: normalizeIssueCodeForReport(report.code),
+        checkCount: Array.isArray(report.checks) ? report.checks.length : 0,
+        failedCheckIds: Array.isArray(report.checks)
+            ? report.checks.filter((check) => !check.pass).map((check) => sanitizeReportToken(check.id, 'check')).filter(Boolean)
+            : []
+    };
+}
+
+function normalizeIssueCodeForReport(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) {
+        return null;
+    }
+    return Object.values(ISSUE_CODES).includes(normalized)
+        ? normalized
+        : ISSUE_CODES.RUNTIME_ERROR;
+}
+
+function normalizePageKindForReport(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return ['missing', 'restricted', 'unsupported', 'google-doc'].includes(normalized)
+        ? normalized
+        : null;
+}
+
+function sanitizeReportToken(value, fallbackPrefix) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (/^[a-z0-9-]{1,48}$/.test(normalized)) {
+        return normalized;
+    }
+    return normalized ? `${fallbackPrefix}-redacted` : '';
+}
+
+function getExtensionManifest() {
+    try {
+        return chrome.runtime?.getManifest?.() || {};
+    } catch (_error) {
+        return {};
+    }
+}
+
+function getUserAgent() {
+    return globalThis.navigator?.userAgent || 'unknown';
+}
+
+function parseBrowserVersion(userAgent) {
+    const value = String(userAgent || '');
+    const match = value.match(/\b(Edg|Chrome|Chromium|Firefox|Version)\/([\d.]+)/);
+    if (!match) {
+        return 'unknown';
+    }
+    return `${match[1]} ${match[2]}`;
+}
+
+function classifyUrl(url) {
+    if (!url) {
+        return 'missing';
+    }
+    if (/^https:\/\/docs\.google\.com\/document\//i.test(url)) {
+        return 'google-doc';
+    }
+    if (/^(chrome|edge|about|chrome-extension):/i.test(url)) {
+        return 'restricted';
+    }
+    try {
+        return new URL(url).protocol.startsWith('http') ? 'other-web-page' : 'unknown';
+    } catch (_error) {
+        return 'unknown';
+    }
+}
+
 function buildErrorResponse(code, error) {
     return {
         ok: false,
@@ -1522,9 +1988,9 @@ function buildRestartRequiredMessage(code) {
         case ISSUE_CODES.EDITOR_AUTO_EDIT:
             return 'Google Docs changed the document during the drip. Review the document, stop the current run, then start again after turning off Smart Compose, spelling or grammar suggestions, and substitutions.';
         case ISSUE_CODES.MANUAL_INTERACTION:
-            return 'The document may have changed during manual interaction. Review it, stop the current run, and start again if you want to continue.';
+            return 'The document may have changed during manual interaction. Review it, click the intended insertion point in the document body, then try Resume. Stop and restart only if the document changed.';
         case ISSUE_CODES.TYPING_CONTEXT_LOST:
-            return 'WriterDrip lost the original typing context. Review the document, stop the current run, and start again after clicking back into the document body.';
+            return 'WriterDrip lost the original typing context. Close other editable fields, review the document, click back into the document body, then try Resume.';
         case ISSUE_CODES.PAGE_CHANGED:
         case ISSUE_CODES.WRONG_DOC:
             return 'The original document context changed during the drip. Return to the intended Google Doc, stop the current run, and start again if needed.';
@@ -1546,6 +2012,7 @@ async function applyResumeConfidenceFailure(tabId, session, report) {
         nextSession.lastError = report.message || 'WriterDrip could not safely resume this run yet.';
         nextSession.attentionCode = report.code || ISSUE_CODES.RUNTIME_ERROR;
         nextSession.attentionMessage = report.note || getRecoveryHint(report.code || ISSUE_CODES.RUNTIME_ERROR, 'Review the Google Doc, then try Resume again.');
+        nextSession.interruptionCount = Math.max(0, nextSession.interruptionCount || 0) + 1;
         nextSession.updatedAt = Date.now();
         await writeSessions(sessions);
     });
@@ -1572,9 +2039,9 @@ function getRecoveryHint(code, fallback) {
         case ISSUE_CODES.EDITOR_FOCUS_FAILED:
             return 'Click inside the document body, wait for Docs to finish loading, then press Resume.';
         case ISSUE_CODES.MANUAL_INTERACTION:
-            return 'If the document changed during manual interaction, review it, then stop the current run and start again.';
+            return 'Review the document, click the intended insertion point in the main document body, then press Resume. Stop and restart only if the document changed.';
         case ISSUE_CODES.TYPING_CONTEXT_LOST:
-            return 'Close comment boxes or other fields, review the document, then stop the current run and start again.';
+            return 'Close comment boxes or other fields, review the document, click back into the main document body, then press Resume.';
         case ISSUE_CODES.BACKGROUND_UNAVAILABLE:
             return 'Reload the extension from chrome://extensions, then reopen the Google Doc tab.';
         default:
@@ -1619,11 +2086,21 @@ function inferIssueCode(message = '') {
 globalThis.__writerdripBackgroundTestHooks = Object.freeze({
     SESSION_STATES,
     createJob,
+    createJobSeed,
     markSessionAwaitingTabReopen,
     normalizeSession,
     applyRuntimeSnapshotToSession,
     findConflictingSessionForDoc,
     buildResumeConfidenceReport,
+    buildRunSummary,
+    normalizeRunSummary,
+    buildDebugReport,
+    redactPopupDebugContext,
+    canResumeAttentionState,
+    runPreflightCheck,
+    runResumeConfidenceCheck,
+    syncPowerKeepAwake,
+    sendRunnerMessageWithCompatibility,
     handleRunnerProgress,
     readSessions,
     writeSessions

@@ -6,7 +6,7 @@
  * https://github.com/Highdrys01/WriterDrip
  */
 
-const WRITERDRIP_RUNNER_VERSION = '2026.04.08.1';
+const WRITERDRIP_RUNNER_VERSION = '2026.04.09.1';
 if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSION) {
     try {
         globalThis.__writerdripRunnerController?.dispose?.();
@@ -17,6 +17,28 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
     globalThis.__writerdripRunnerLoaded = true;
     globalThis.__writerdripRunnerVersion = WRITERDRIP_RUNNER_VERSION;
     const DOC_PATH_PATTERN = /^\/document\/d\/([^/]+)/;
+    const GOOGLE_DOCS_NON_TYPING_SELECTOR = [
+        '.docs-toolbar',
+        '.docs-menubar',
+        '.docs-titlebar',
+        '.docs-ruler',
+        '.goog-toolbar',
+        '.goog-menu',
+        '.goog-menuitem',
+        '.kix-horizontal-ruler',
+        '.kix-vertical-ruler',
+        '.docos',
+        '.docs-side-panel',
+        '.navigation-widget',
+        '[role="toolbar"]',
+        '[role="menu"]',
+        '[role="dialog"]',
+        '[aria-label*="toolbar"]',
+        '[aria-label*="Toolbar"]',
+        '[aria-label*="menu"]',
+        '[aria-label*="Menu"]'
+    ].join(',');
+    const GOOGLE_DOCS_TYPING_SURFACE_SELECTOR = '.kix-page-paginated, .kix-page, .kix-page-content-wrapper, .kix-canvas-tile-content, .kix-cursor, .kix-selection-overlay';
 
     const RUNNER_STATES = {
         IDLE: 'idle',
@@ -82,24 +104,45 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         'are',
         'as',
         'at',
+        'but',
         'be',
         'by',
         'do',
         'for',
+        'from',
+        'had',
+        'has',
+        'he',
+        'her',
+        'his',
         'if',
         'in',
         'is',
         'it',
         'me',
         'my',
+        'not',
         'of',
         'on',
         'or',
+        'our',
+        'out',
+        'she',
         'so',
+        'that',
+        'the',
+        'they',
+        'this',
         'to',
         'up',
         'us',
-        'we'
+        'was',
+        'were',
+        'we',
+        'will',
+        'with',
+        'your',
+        'you'
     ]);
     const CONNECTIVE_PAUSE_WORDS = new Set([
         'although',
@@ -130,107 +173,448 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         u: 'io'
     });
     const SOFT_SLIP_MAP = Object.freeze({
+        b: 'vn',
         c: 'sx',
         d: 'sf',
+        f: 'dg',
         g: 'fh',
+        h: 'gj',
+        j: 'hk',
+        k: 'jl',
         l: 'ko',
         m: 'n',
         n: 'm',
         p: 'o',
+        q: 'wa',
         r: 'et',
+        s: 'ad',
         t: 'ry',
+        v: 'cb',
+        w: 'qe',
+        x: 'zs',
+        z: 'asx',
         y: 'tu'
     });
+    const ONE_WAY_WORD_VARIANT_TARGETS = new Set([
+        'absense',
+        'accidently',
+        'accomodate',
+        'acceptible',
+        'acheive',
+        'acheivement',
+        'accross',
+        'adress',
+        'agressive',
+        'allready',
+        'amatuer',
+        'anual',
+        'anser',
+        'appearence',
+        'apparant',
+        'apparantly',
+        'arguement',
+        'artical',
+        'aquire',
+        'aquired',
+        'availible',
+        'basicly',
+        'beatiful',
+        'begining',
+        'becuase',
+        'beleive',
+        'brough',
+        'briliant',
+        'buisness',
+        'calender',
+        'carrer',
+        'catagory',
+        'cemetary',
+        'certian',
+        'changeed',
+        'collegue',
+        'colum',
+        'comming',
+        'commitee',
+        'commited',
+        'completly',
+        'compitition',
+        'conclussion',
+        'confidance',
+        'consciense',
+        'concious',
+        'consistant',
+        'convienient',
+        'curiousity',
+        'decison',
+        'definately',
+        'diffrent',
+        'disapoint',
+        'discription',
+        'dissapear',
+        'dose',
+        'duirng',
+        'embarass',
+        'enviroment',
+        'efficent',
+        'especialy',
+        'every day',
+        'every one',
+        'excercise',
+        'experiance',
+        'explane',
+        'existance',
+        'exellent',
+        'familar',
+        'faverite',
+        'finaly',
+        'foriegn',
+        'frequentely',
+        'freind',
+        'fulfiled',
+        'garantee',
+        'grammer',
+        'goverment',
+        'happend',
+        'heighth',
+        'honestley',
+        'identy',
+        'imediately',
+        'immagine',
+        'importent',
+        'independant',
+        'insted',
+        'inteligence',
+        'intresting',
+        'knowlege',
+        'langauge',
+        'libary',
+        'maintainance',
+        'manageble',
+        'messege',
+        'minuite',
+        'natrual',
+        'neccessary',
+        'ninty',
+        'noticable',
+        'obviusly',
+        'ocassionally',
+        'occured',
+        'oppinion',
+        'oppurtunity',
+        'orignal',
+        'orignally',
+        'paralell',
+        'particuler',
+        'permenant',
+        'posession',
+        'possable',
+        'preformance',
+        'prefered',
+        'preperation',
+        'priviledge',
+        'probaly',
+        'probelm',
+        'proffesional',
+        'pronounciation',
+        'publically',
+        'quesiton',
+        'recieve',
+        'reccomend',
+        'refrence',
+        'relavent',
+        'relize',
+        'remeber',
+        'requiered',
+        'responsiblity',
+        'realy',
+        'restaraunt',
+        'rythm',
+        'scedule',
+        'sceince',
+        'sentance',
+        'similiar',
+        'sincerly',
+        'somthing',
+        'studing',
+        'succesful',
+        'sumary',
+        'suprise',
+        'temporay',
+        'tommorow',
+        'togather',
+        'truely',
+        'untill',
+        'unfortunatly',
+        'usualy',
+        'wierd',
+        'writen',
+        'writting'
+    ]);
     const WORD_VARIANT_MAP = createWordVariantMap([
+        ['absence', 'absense'],
         ['accept', 'except'],
+        ['accidentally', 'accidently'],
+        ['accommodate', 'accomodate'],
+        ['acceptable', 'acceptible'],
+        ['access', 'excess'],
+        ['acquire', 'aquire'],
+        ['acquired', 'aquired'],
+        ['achieve', 'acheive'],
+        ['achievement', 'acheivement'],
+        ['across', 'accross'],
+        ['address', 'adress'],
+        ['adapt', 'adopt'],
+        ['addition', 'edition'],
         ['advice', 'advise'],
         ['affect', 'effect'],
+        ['aggressive', 'agressive'],
+        ['all right', 'alright'],
+        ['allusion', 'illusion'],
         ['aisle', 'isle'],
         ['allowed', 'aloud'],
+        ['already', 'allready'],
         ['alter', 'altar'],
+        ['amateur', 'amatuer'],
+        ['among', 'between'],
+        ['amount', 'number'],
+        ['annual', 'anual'],
+        ['answer', 'anser'],
+        ['appearance', 'appearence'],
+        ['apparent', 'apparant'],
+        ['apparently', 'apparantly'],
+        ['appraise', 'apprise'],
+        ['argument', 'arguement'],
+        ['article', 'artical'],
+        ['available', 'availible'],
+        ['basically', 'basicly'],
+        ['beautiful', 'beatiful'],
         ['bail', 'bale'],
         ['bare', 'bear'],
+        ['beginning', 'begining'],
+        ['because', 'becuase'],
+        ['believe', 'beleive'],
         ['berry', 'bury'],
         ['board', 'bored'],
         ['born', 'borne'],
         ['brake', 'break'],
         ['breath', 'breathe'],
         ['bridal', 'bridle'],
+        ['brilliant', 'briliant'],
+        ['brought', 'brough'],
+        ['business', 'buisness'],
+        ['calendar', 'calender'],
+        ['canvas', 'canvass'],
         ['capital', 'capitol'],
+        ['career', 'carrer'],
+        ['category', 'catagory'],
+        ['cemetery', 'cemetary'],
         ['cell', 'sell'],
         ['ceiling', 'sealing'],
         ['cent', 'scent'],
+        ['certain', 'certian'],
+        ['changed', 'changeed'],
         ['cite', 'site'],
         ['clause', 'claws'],
         ['coarse', 'course'],
+        ['college', 'collage'],
+        ['coming', 'comming'],
         ['complement', 'compliment'],
+        ['completely', 'completly'],
+        ['colleague', 'collegue'],
+        ['column', 'colum'],
+        ['committee', 'commitee'],
+        ['committed', 'commited'],
+        ['competition', 'compitition'],
+        ['conclusion', 'conclussion'],
+        ['confidence', 'confidance'],
+        ['conscience', 'consciense'],
+        ['conscious', 'concious'],
+        ['consistent', 'consistant'],
+        ['convenient', 'convienient'],
         ['council', 'counsel'],
+        ['credible', 'creditable'],
         ['creak', 'creek'],
+        ['curiosity', 'curiousity'],
         ['dear', 'deer'],
+        ['decision', 'decison'],
+        ['definitely', 'definately'],
+        ['defuse', 'diffuse'],
         ['descent', 'dissent'],
+        ['description', 'discription'],
         ['desert', 'dessert'],
         ['device', 'devise'],
+        ['develop', 'develope'],
+        ['different', 'diffrent'],
+        ['disappoint', 'disapoint'],
+        ['disappear', 'dissapear'],
         ['discreet', 'discrete'],
+        ['does', 'dose'],
         ['dual', 'duel'],
+        ['during', 'duirng'],
+        ['efficient', 'efficent'],
         ['elicit', 'illicit'],
+        ['embarrass', 'embarass'],
+        ['emigrate', 'immigrate'],
         ['eminent', 'imminent'],
+        ['environment', 'enviroment'],
         ['ensure', 'insure'],
+        ['especially', 'especialy'],
+        ['everyday', 'every day'],
+        ['everyone', 'every one'],
+        ['exercise', 'excercise'],
+        ['existence', 'existance'],
+        ['excellent', 'exellent'],
+        ['experience', 'experiance'],
+        ['explain', 'explane'],
+        ['familiar', 'familar'],
         ['fare', 'fair'],
         ['farther', 'further'],
+        ['favorite', 'faverite'],
+        ['fewer', 'less'],
+        ['finally', 'finaly'],
         ['flea', 'flee'],
+        ['focused', 'focussed'],
+        ['foreign', 'foriegn'],
         ['form', 'from'],
         ['forth', 'fourth'],
+        ['frequently', 'frequentely'],
+        ['friend', 'freind'],
+        ['fulfilled', 'fulfiled'],
+        ['grammar', 'grammer'],
         ['grate', 'great'],
+        ['government', 'goverment'],
+        ['guarantee', 'garantee'],
         ['groan', 'grown'],
+        ['happened', 'happend'],
         ['hanger', 'hangar'],
         ['heard', 'herd'],
         ['heel', 'heal'],
+        ['height', 'heighth'],
         ['here', 'hear'],
+        ['honestly', 'honestley'],
+        ['identity', 'identy'],
         ['idle', 'idol'],
+        ['imagine', 'immagine'],
+        ['immediately', 'imediately'],
+        ['imply', 'infer'],
+        ['important', 'importent'],
+        ['independent', 'independant'],
+        ['instead', 'insted'],
+        ['intelligence', 'inteligence'],
+        ['interesting', 'intresting'],
         ['knew', 'new'],
         ['knight', 'night'],
+        ['knowledge', 'knowlege'],
+        ['language', 'langauge'],
+        ['later', 'latter'],
+        ['lead', 'led'],
         ['leak', 'leek'],
         ['lesson', 'lessen'],
+        ['library', 'libary'],
         ['loan', 'lone'],
         ['lose', 'loose'],
         ['made', 'maid'],
         ['mail', 'male'],
         ['main', 'mane'],
+        ['maintenance', 'maintainance'],
+        ['manageable', 'manageble'],
         ['meat', 'meet'],
         ['medal', 'metal'],
+        ['message', 'messege'],
+        ['minute', 'minuite'],
         ['moral', 'morale'],
         ['muscle', 'mussel'],
+        ['natural', 'natrual'],
         ['naval', 'navel'],
+        ['necessary', 'neccessary'],
+        ['ninety', 'ninty'],
+        ['noticeable', 'noticable'],
+        ['obviously', 'obviusly'],
+        ['occasionally', 'ocassionally'],
+        ['occurred', 'occured'],
+        ['opinion', 'oppinion'],
+        ['opportunity', 'oppurtunity'],
+        ['original', 'orignal'],
+        ['originally', 'orignally'],
+        ['parallel', 'paralell'],
+        ['particular', 'particuler'],
         ['peace', 'piece'],
         ['peak', 'peek'],
+        ['performance', 'preformance'],
+        ['permanent', 'permenant'],
+        ['personal', 'personnel'],
+        ['perspective', 'prospective'],
         ['phase', 'faze'],
         ['plain', 'plane'],
+        ['possible', 'possable'],
+        ['possession', 'posession'],
         ['pore', 'pour'],
         ['practice', 'practise'],
+        ['precedent', 'president'],
+        ['preferred', 'prefered'],
+        ['preparation', 'preperation'],
+        ['professional', 'proffesional'],
+        ['pronunciation', 'pronounciation'],
         ['pray', 'prey'],
         ['precede', 'proceed'],
         ['principal', 'principle'],
+        ['privilege', 'priviledge'],
+        ['probably', 'probaly'],
+        ['problem', 'probelm'],
         ['profit', 'prophet'],
+        ['publicly', 'publically'],
+        ['question', 'quesiton'],
+        ['receive', 'recieve'],
+        ['realize', 'relize'],
+        ['recommend', 'reccomend'],
+        ['reference', 'refrence'],
+        ['relevant', 'relavent'],
+        ['remember', 'remeber'],
+        ['required', 'requiered'],
+        ['respectfully', 'respectively'],
+        ['responsibility', 'responsiblity'],
         ['quite', 'quiet'],
         ['rain', 'reign'],
+        ['really', 'realy'],
+        ['restaurant', 'restaraunt'],
         ['right', 'write'],
+        ['rhythm', 'rythm'],
         ['role', 'roll'],
+        ['schedule', 'scedule'],
         ['scene', 'seen'],
+        ['science', 'sceince'],
         ['serial', 'cereal'],
+        ['sentence', 'sentance'],
+        ['separate', 'seperate'],
+        ['similar', 'similiar'],
         ['sheer', 'shear'],
+        ['sincerely', 'sincerly'],
         ['slay', 'sleigh'],
         ['soar', 'sore'],
         ['sole', 'soul'],
+        ['something', 'somthing'],
         ['stair', 'stare'],
         ['stake', 'steak'],
         ['stationary', 'stationery'],
         ['steel', 'steal'],
+        ['studying', 'studing'],
+        ['successful', 'succesful'],
         ['suite', 'sweet'],
+        ['summary', 'sumary'],
+        ['surprise', 'suprise'],
         ['tail', 'tale'],
+        ['temporary', 'temporay'],
         ['than', 'then'],
         ['their', 'there'],
         ['throne', 'thrown'],
+        ['through', 'thru'],
+        ['tomorrow', 'tommorow'],
+        ['together', 'togather'],
         ['trail', 'trial'],
+        ['truly', 'truely'],
+        ['unfortunately', 'unfortunatly'],
+        ['until', 'untill'],
+        ['usually', 'usualy'],
         ['vain', 'vein'],
         ['vale', 'veil'],
         ['waist', 'waste'],
@@ -240,9 +624,14 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         ['weak', 'week'],
         ['weather', 'whether'],
         ['were', 'where'],
+        ['weird', 'wierd'],
         ['which', 'witch'],
+        ['whose', "who's"],
         ['whole', 'hole'],
         ['wood', 'would'],
+        ['written', 'writen'],
+        ['writing', 'writting'],
+        ['your', "you're"],
         ['yoke', 'yolk']
     ]);
 
@@ -259,133 +648,135 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             }
 
             map[left] = right;
-            map[right] = left;
+            if (!ONE_WAY_WORD_VARIANT_TARGETS.has(right)) {
+                map[right] = left;
+            }
         }
         return map;
     }
     const CORRECTION_MODIFIERS = {
         low: {
-            chanceScale: 0.24,
-            budgetScale: 0.34,
-            budgetOffset: -0.45,
-            cooldownScale: 1.72,
-            immediateRepairOffset: 0.11,
+            chanceScale: 0.3,
+            budgetScale: 0.4,
+            budgetOffset: -0.32,
+            cooldownScale: 1.58,
+            immediateRepairOffset: 0.12,
             wordBoundaryOffset: 0.1,
-            repairDepthScale: 0.68,
+            repairDepthScale: 0.72,
             noticePauseScale: 0.88,
             realignPauseScale: 0.88,
-            transpositionScale: 0.68,
-            doubleTapScale: 0.64,
-            casingScale: 0.66,
-            omissionScale: 0.56,
-            spacingOmissionScale: 0.1,
-            doubleSpaceScale: 0.08,
-            punctuationOmissionScale: 0.1,
-            punctuationSpacingScale: 0.08,
-            punctuationSubstitutionScale: 0.04,
+            transpositionScale: 0.74,
+            doubleTapScale: 0.7,
+            casingScale: 0.72,
+            omissionScale: 0.64,
+            spacingOmissionScale: 0.16,
+            doubleSpaceScale: 0.12,
+            punctuationOmissionScale: 0.15,
+            punctuationSpacingScale: 0.12,
+            punctuationSubstitutionScale: 0.07,
             multiPunctuationScale: 0,
-            joinerOmissionScale: 0.06,
+            joinerOmissionScale: 0.09,
             repeatWordScale: 0,
             smallWordSkipScale: 0,
-            spacingScale: 1.34,
+            spacingScale: 1.28,
             segmentBias: -1,
             sentenceAllowanceBonus: 0,
             wordVariantScale: 0,
             maxWordVariantScale: 0,
             variantMinWordCount: 999,
             variantMinChars: 99999,
-            keyboardSlipScale: 0.72,
-            vowelSlipScale: 0.32,
-            softSlipScale: 0.16,
-            guaranteedMinChars: 560,
-            repairMessinessScale: 0.14,
-            repairAfterExtraScale: 0.56,
-            repairHardExtraScale: 0.64,
-            lingeringRepairScale: 0.1,
+            keyboardSlipScale: 0.82,
+            vowelSlipScale: 0.42,
+            softSlipScale: 0.24,
+            guaranteedMinChars: 420,
+            repairMessinessScale: 0.18,
+            repairAfterExtraScale: 0.62,
+            repairHardExtraScale: 0.7,
+            lingeringRepairScale: 0.12,
             sentenceCarryScale: 0.02,
             wordVariantDelayScale: 0.78
         },
         medium: {
-            chanceScale: 0.9,
-            budgetScale: 0.92,
-            budgetOffset: 0,
-            cooldownScale: 1.04,
-            immediateRepairOffset: 0.01,
-            wordBoundaryOffset: 0.02,
-            repairDepthScale: 0.94,
-            noticePauseScale: 1,
-            realignPauseScale: 1,
-            transpositionScale: 0.96,
-            doubleTapScale: 0.94,
-            casingScale: 0.96,
-            omissionScale: 0.94,
-            spacingOmissionScale: 0.62,
-            doubleSpaceScale: 0.54,
-            punctuationOmissionScale: 0.68,
-            punctuationSpacingScale: 0.5,
-            punctuationSubstitutionScale: 0.44,
-            multiPunctuationScale: 0.24,
-            joinerOmissionScale: 0.52,
-            repeatWordScale: 0.34,
-            smallWordSkipScale: 0.26,
-            spacingScale: 1.06,
-            segmentBias: 0,
-            sentenceAllowanceBonus: 0,
-            wordVariantScale: 0.48,
-            maxWordVariantScale: 1,
-            variantMinWordCount: 70,
-            variantMinChars: 1100,
-            keyboardSlipScale: 0.94,
-            vowelSlipScale: 0.82,
-            softSlipScale: 0.48,
-            guaranteedMinChars: 180,
-            repairMessinessScale: 0.62,
-            repairAfterExtraScale: 0.94,
-            repairHardExtraScale: 0.96,
-            lingeringRepairScale: 0.46,
-            sentenceCarryScale: 0.12,
-            wordVariantDelayScale: 1.02
+            chanceScale: 1.18,
+            budgetScale: 1.22,
+            budgetOffset: 0.38,
+            cooldownScale: 0.86,
+            immediateRepairOffset: -0.03,
+            wordBoundaryOffset: -0.01,
+            repairDepthScale: 1.08,
+            noticePauseScale: 1.04,
+            realignPauseScale: 1.03,
+            transpositionScale: 1.08,
+            doubleTapScale: 1.06,
+            casingScale: 1.06,
+            omissionScale: 1.08,
+            spacingOmissionScale: 0.86,
+            doubleSpaceScale: 0.76,
+            punctuationOmissionScale: 0.9,
+            punctuationSpacingScale: 0.76,
+            punctuationSubstitutionScale: 0.7,
+            multiPunctuationScale: 0.42,
+            joinerOmissionScale: 0.74,
+            repeatWordScale: 0.58,
+            smallWordSkipScale: 0.44,
+            spacingScale: 0.92,
+            segmentBias: 1,
+            sentenceAllowanceBonus: 1,
+            wordVariantScale: 0.88,
+            maxWordVariantScale: 1.55,
+            variantMinWordCount: 42,
+            variantMinChars: 560,
+            keyboardSlipScale: 1.1,
+            vowelSlipScale: 1.04,
+            softSlipScale: 0.72,
+            guaranteedMinChars: 140,
+            repairMessinessScale: 0.86,
+            repairAfterExtraScale: 1.08,
+            repairHardExtraScale: 1.12,
+            lingeringRepairScale: 0.62,
+            sentenceCarryScale: 0.2,
+            wordVariantDelayScale: 1.1
         },
         high: {
-            chanceScale: 3.45,
-            budgetScale: 2.75,
-            budgetOffset: 2.2,
-            cooldownScale: 0.3,
-            immediateRepairOffset: -0.15,
-            wordBoundaryOffset: -0.12,
-            repairDepthScale: 1.84,
-            noticePauseScale: 1.24,
-            realignPauseScale: 1.16,
-            transpositionScale: 1.44,
-            doubleTapScale: 1.4,
-            casingScale: 1.36,
-            omissionScale: 1.56,
-            spacingOmissionScale: 1.58,
-            doubleSpaceScale: 1.46,
-            punctuationOmissionScale: 1.56,
-            punctuationSpacingScale: 1.38,
-            punctuationSubstitutionScale: 1.62,
-            multiPunctuationScale: 1.52,
-            joinerOmissionScale: 1.42,
-            repeatWordScale: 1.54,
-            smallWordSkipScale: 1.28,
-            spacingScale: 0.54,
-            segmentBias: 3,
-            sentenceAllowanceBonus: 3,
-            wordVariantScale: 2.2,
-            maxWordVariantScale: 2.9,
-            variantMinWordCount: 18,
-            variantMinChars: 180,
-            keyboardSlipScale: 1.44,
-            vowelSlipScale: 1.92,
-            softSlipScale: 1.28,
-            guaranteedMinChars: 95,
-            repairMessinessScale: 2.1,
-            repairAfterExtraScale: 1.78,
-            repairHardExtraScale: 1.96,
-            lingeringRepairScale: 1.18,
-            sentenceCarryScale: 0.46,
-            wordVariantDelayScale: 1.48
+            chanceScale: 6.1,
+            budgetScale: 4.35,
+            budgetOffset: 5.2,
+            cooldownScale: 0.16,
+            immediateRepairOffset: -0.24,
+            wordBoundaryOffset: -0.2,
+            repairDepthScale: 2.55,
+            noticePauseScale: 1.42,
+            realignPauseScale: 1.3,
+            transpositionScale: 1.84,
+            doubleTapScale: 1.82,
+            casingScale: 1.72,
+            omissionScale: 2.1,
+            spacingOmissionScale: 2.22,
+            doubleSpaceScale: 2.04,
+            punctuationOmissionScale: 2.24,
+            punctuationSpacingScale: 2.04,
+            punctuationSubstitutionScale: 2.3,
+            multiPunctuationScale: 2.18,
+            joinerOmissionScale: 1.98,
+            repeatWordScale: 2.2,
+            smallWordSkipScale: 1.9,
+            spacingScale: 0.34,
+            segmentBias: 7,
+            sentenceAllowanceBonus: 5,
+            wordVariantScale: 4.25,
+            maxWordVariantScale: 5.4,
+            variantMinWordCount: 12,
+            variantMinChars: 110,
+            keyboardSlipScale: 2.05,
+            vowelSlipScale: 2.72,
+            softSlipScale: 2.04,
+            guaranteedMinChars: 70,
+            repairMessinessScale: 3.25,
+            repairAfterExtraScale: 2.36,
+            repairHardExtraScale: 2.62,
+            lingeringRepairScale: 1.82,
+            sentenceCarryScale: 0.92,
+            wordVariantDelayScale: 1.76
         }
     };
 
@@ -481,6 +872,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         'selectionchange'
     ];
     const interferenceDocuments = new Set();
+    let pendingInterferenceCheckTimer = null;
     syncInterferenceListeners();
 
     async function handleRunnerMessage(message) {
@@ -575,6 +967,10 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             stopRequested: false,
             paused: false,
             pauseStartedAtMs: 0,
+            pauseCount: 0,
+            pauseReason: null,
+            timerDriftAdjustments: 0,
+            timerDriftMs: 0,
             lockedElement: target,
             lastCompletionVerification: null,
             lastReportedAt: 0,
@@ -616,9 +1012,16 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             return buildRunnerError(ISSUE_CODES.NO_ACTIVE_RUN, 'No matching drip is active in this tab.');
         }
 
+        if (!runner.paused) {
+            runner.pauseCount = Math.max(0, runner.pauseCount || 0) + 1;
+        }
         runner.paused = true;
         runner.state = RUNNER_STATES.PAUSED;
         runner.pauseStartedAtMs = Date.now();
+        runner.pauseReason = {
+            code: 'manual-pause',
+            message: 'Paused from the WriterDrip popup.'
+        };
         await reportProgress(true);
         return {
             status: 'ok',
@@ -638,6 +1041,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         runner.paused = false;
         runner.state = RUNNER_STATES.RUNNING;
         runner.pauseStartedAtMs = 0;
+        runner.pauseReason = null;
         await reportProgress(true);
         return {
             status: 'ok',
@@ -653,6 +1057,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         runner.stopRequested = true;
         runner.paused = false;
         runner.pauseStartedAtMs = 0;
+        runner.pauseReason = null;
         runner.state = RUNNER_STATES.IDLE;
 
         return {
@@ -692,7 +1097,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             const targetReady = await ensureActiveTarget();
             if (!targetReady) {
                 const issue = getTypingContextIssue(runner.lockedElement);
-                await failRun(issue || {
+                await pauseForRecoverableInterference(issue || {
                     code: ISSUE_CODES.TYPING_CONTEXT_LOST,
                     message: 'The editor target was lost. Click back into the editor and resume.'
                 });
@@ -749,6 +1154,11 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
 
             const dueAtMs = runner.timelineOriginMs + ((runner.cumulativeDelays[runner.completedIndex] || 0) * 1000);
             const remaining = dueAtMs - Date.now();
+            if (smoothLateTimerDrift(remaining)) {
+                await reportProgress(false);
+                await sleep(250);
+                continue;
+            }
             if (remaining <= 0) {
                 return true;
             }
@@ -757,6 +1167,37 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         }
 
         return false;
+    }
+
+    function smoothLateTimerDrift(remainingMs) {
+        if (remainingMs >= 0) {
+            return false;
+        }
+
+        const lateByMs = Math.abs(remainingMs);
+        const toleranceMs = getTimerDriftToleranceMs();
+        if (lateByMs <= toleranceMs) {
+            return false;
+        }
+
+        const bufferMs = getTimerDriftBufferMs();
+        const shiftMs = lateByMs + bufferMs;
+        runner.timelineOriginMs += shiftMs;
+        runner.timerDriftAdjustments = Math.max(0, runner.timerDriftAdjustments || 0) + 1;
+        runner.timerDriftMs = Math.max(0, runner.timerDriftMs || 0) + shiftMs;
+        return true;
+    }
+
+    function getTimerDriftToleranceMs() {
+        const currentAction = runner.actions?.[runner.completedIndex] || null;
+        const actionDelayMs = Math.max(0, Number(currentAction?.delay) || 0) * 1000;
+        return Math.max(3500, Math.min(20000, actionDelayMs * 2));
+    }
+
+    function getTimerDriftBufferMs() {
+        const currentAction = runner.actions?.[runner.completedIndex] || null;
+        const actionDelayMs = Math.max(0, Number(currentAction?.delay) || 0) * 1000;
+        return Math.max(350, Math.min(1800, actionDelayMs * 0.2));
     }
 
     async function completeRun() {
@@ -768,12 +1209,18 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         runner.state = RUNNER_STATES.COMPLETE;
         runner.paused = false;
         runner.pauseStartedAtMs = 0;
+        runner.pauseReason = null;
         runner.stopRequested = false;
         runner.completedIndex = runner.actions.length;
         runner.elapsedSeconds = runner.totalSeconds;
         await sleep(80);
         runner.lastCompletionVerification = buildCompletionVerification();
         payload.verification = runner.lastCompletionVerification;
+        payload.stats = buildRunActionStats(runner.actions, runner.completedIndex, {
+            pauseCount: runner.pauseCount,
+            timerDriftAdjustments: runner.timerDriftAdjustments,
+            delayedBySeconds: Math.round((Math.max(0, runner.timerDriftMs || 0) / 1000) * 10) / 10
+        });
         await reportProgress(true);
         await notifyBackground('runner:completed', payload);
     }
@@ -789,6 +1236,35 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             code: issue.code,
             message: issue.message
         });
+    }
+
+    async function pauseForRecoverableInterference(codeOrIssue, message = null) {
+        const issue = normalizeIssue(codeOrIssue, message);
+        if (!runner.runId || runner.state !== RUNNER_STATES.RUNNING) {
+            return;
+        }
+
+        if (!isSoftPauseIssue(issue.code)) {
+            await failRun(issue);
+            return;
+        }
+
+        runner.paused = true;
+        runner.state = RUNNER_STATES.PAUSED;
+        runner.pauseStartedAtMs = Date.now();
+        runner.pauseCount = Math.max(0, runner.pauseCount || 0) + 1;
+        runner.pauseReason = {
+            code: issue.code,
+            message: issue.message
+        };
+        await reportProgress(true);
+    }
+
+    function isSoftPauseIssue(code) {
+        return code === ISSUE_CODES.MANUAL_INTERACTION ||
+            code === ISSUE_CODES.TYPING_CONTEXT_LOST ||
+            code === ISSUE_CODES.EDITOR_NOT_READY ||
+            code === ISSUE_CODES.EDITOR_FOCUS_FAILED;
     }
 
     async function reportProgress(force) {
@@ -814,7 +1290,9 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             eta: runtime.eta,
             actionIndex: runtime.actionIndex,
             totalActions: runtime.totalActions,
-            verification: runtime.completionVerification || null
+            pauseReason: runtime.pauseReason || null,
+            verification: runtime.completionVerification || null,
+            stats: runtime.runStats || null
         };
     }
 
@@ -823,6 +1301,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         const totalSeconds = runner.totalSeconds || 0;
         const remainingSeconds = Math.max(0, totalSeconds - (runner.elapsedSeconds || 0));
         const percent = totalSeconds > 0 ? clamp((runner.elapsedSeconds || 0) / totalSeconds, 0, 1) : 0;
+        const delayedBySeconds = Math.round((Math.max(0, runner.timerDriftMs || 0) / 1000) * 10) / 10;
 
         return {
             runId: runner.runId,
@@ -831,9 +1310,30 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             totalActions,
             percent,
             eta: formatClock(remainingSeconds),
+            pauseReason: runner.paused ? normalizePauseReason(runner.pauseReason) : null,
+            timerDriftAdjustments: Math.max(0, runner.timerDriftAdjustments || 0),
+            delayedBySeconds,
             completionVerification: runner.state === RUNNER_STATES.COMPLETE
                 ? runner.lastCompletionVerification || null
+                : null,
+            runStats: runner.state === RUNNER_STATES.COMPLETE
+                ? buildRunActionStats(runner.actions, runner.completedIndex, {
+                    pauseCount: runner.pauseCount,
+                    timerDriftAdjustments: runner.timerDriftAdjustments,
+                    delayedBySeconds
+                })
                 : null
+        };
+    }
+
+    function normalizePauseReason(reason) {
+        if (!reason || typeof reason !== 'object') {
+            return null;
+        }
+
+        return {
+            code: String(reason.code || 'manual-pause').slice(0, 48),
+            message: String(reason.message || 'Paused.').slice(0, 240)
         };
     }
 
@@ -1211,10 +1711,10 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         }
 
         if (event.type === 'selectionchange') {
-            const issue = getTypingContextIssue(runner.lockedElement);
-            if (issue) {
-                void failRun(issue);
-            }
+            queueInterferenceContextCheck('selectionchange', {
+                delayMs: 160,
+                failIfStable: false
+            });
             return;
         }
 
@@ -1223,12 +1723,15 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         }
 
         if (event.type === 'mousedown' || event.type === 'touchstart') {
-            void failRun(ISSUE_CODES.MANUAL_INTERACTION, 'Manual interaction was detected in the Google Doc tab. Click back into the document and resume when you are ready.');
+            handleTrustedPointerInterference(event);
             return;
         }
 
         if (event.type === 'focusin' && hasConflictingEditableFocus(runner.lockedElement)) {
-            void failRun(ISSUE_CODES.TYPING_CONTEXT_LOST, 'Another editable field took focus in Google Docs. Click back into the document body and resume when you are ready.');
+            queueInterferenceContextCheck('focusin', {
+                delayMs: 180,
+                failIfStable: false
+            });
             return;
         }
 
@@ -1247,6 +1750,52 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         }
 
         void failRun(ISSUE_CODES.MANUAL_INTERACTION, 'Manual interaction was detected in the Google Doc. Click back into the document and resume when you are ready.');
+    }
+
+    function handleTrustedPointerInterference(event) {
+        const targetsEditor = eventTargetsGoogleDocsTypingSurface(event.target);
+        if (!targetsEditor) {
+            queueInterferenceContextCheck('pointer-outside-editor', {
+                delayMs: 220,
+                failIfStable: false
+            });
+            return;
+        }
+
+        queueInterferenceContextCheck('pointer-inside-editor', {
+            delayMs: 180,
+            failIfStable: true,
+            message: 'You clicked inside the Google Doc while WriterDrip was running. Review the cursor, then press Resume to continue from the saved checkpoint.'
+        });
+    }
+
+    function queueInterferenceContextCheck(_reason, options = {}) {
+        clearPendingInterferenceCheck();
+        const delayMs = Math.max(60, Number(options.delayMs) || 160);
+        pendingInterferenceCheckTimer = setTimeout(() => {
+            pendingInterferenceCheckTimer = null;
+
+            if (!runner.runId || runner.state !== RUNNER_STATES.RUNNING || !isCurrentJobDocument(runner.job)) {
+                return;
+            }
+
+            const issue = getTypingContextIssue(runner.lockedElement);
+            if (issue) {
+                void pauseForRecoverableInterference(issue);
+                return;
+            }
+
+            if (options.failIfStable) {
+                void pauseForRecoverableInterference(ISSUE_CODES.MANUAL_INTERACTION, options.message || 'Manual interaction was detected in the Google Doc. Click back into the document and resume when you are ready.');
+            }
+        }, delayMs);
+    }
+
+    function clearPendingInterferenceCheck() {
+        if (pendingInterferenceCheckTimer) {
+            clearTimeout(pendingInterferenceCheckTimer);
+            pendingInterferenceCheckTimer = null;
+        }
     }
 
     function getTrustedEditorChangeIssue(event) {
@@ -1339,6 +1888,29 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         }
 
         return Boolean(target.closest?.('.kix-appview-editor, .docs-editor, .kix-page-paginated, .kix-page, .kix-page-content-wrapper, .kix-canvas-tile-content'));
+    }
+
+    function eventTargetsGoogleDocsTypingSurface(target) {
+        if (!target) {
+            return false;
+        }
+
+        const element = target.nodeType === Node.ELEMENT_NODE
+            ? target
+            : target.parentElement;
+        if (!element) {
+            return isGoogleDocsTarget(target);
+        }
+
+        if (element.closest?.(GOOGLE_DOCS_NON_TYPING_SELECTOR)) {
+            return false;
+        }
+
+        if (isGoogleDocsTarget(element)) {
+            return true;
+        }
+
+        return Boolean(element.closest?.(GOOGLE_DOCS_TYPING_SURFACE_SELECTOR));
     }
 
     function isGoogleDocsSurfaceNode(target) {
@@ -1635,7 +2207,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             docKey: currentDocKey,
             checks,
             message: 'WriterDrip is ready to start in this Google Doc.',
-            note: 'Start the drip from this popup, then keep the original Google Doc tab, browser, and computer available until it finishes.'
+            note: 'Start the drip from this popup, then keep the original Google Doc tab and browser open. WriterDrip will request system keep-awake protection while it runs.'
         };
     }
 
@@ -1675,10 +2247,98 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         };
     }
 
+    function buildRunActionStats(actions, completedIndex = null, runtimeStats = {}) {
+        const safeActions = Array.isArray(actions) ? actions : [];
+        const limit = Number.isFinite(completedIndex)
+            ? clamp(Math.floor(completedIndex), 0, safeActions.length)
+            : safeActions.length;
+        const deliveredActions = safeActions.slice(0, limit);
+        const stats = {
+            totalActions: safeActions.length,
+            deliveredActions: deliveredActions.length,
+            totalDelaySeconds: roundStat(sumActionDelays(safeActions, safeActions.length)),
+            deliveredDelaySeconds: roundStat(sumActionDelays(safeActions, deliveredActions.length)),
+            correctionSequences: 0,
+            delayedRepairs: 0,
+            pauseMoments: 0,
+            correctionBackspaces: 0,
+            repairSlipOutputs: 0,
+            mistakeOutputs: 0,
+            wordLevelRepairs: 0,
+            punctuationRepairs: 0,
+            spacingRepairs: 0,
+            userPauses: Math.max(0, Math.floor(Number(runtimeStats.pauseCount) || 0)),
+            timerDriftAdjustments: Math.max(0, Math.floor(Number(runtimeStats.timerDriftAdjustments) || 0)),
+            delayedBySeconds: roundStat(runtimeStats.delayedBySeconds || 0)
+        };
+        let activeMistakeIndex = -1;
+
+        for (let index = 0; index < deliveredActions.length; index += 1) {
+            const action = deliveredActions[index];
+            const kind = action?.kind || '';
+
+            if (action?.char === null || kind.endsWith('pause') || kind === 'repair-realign') {
+                stats.pauseMoments += 1;
+            }
+            if (kind === 'repair-pause') {
+                stats.correctionSequences += 1;
+                if (activeMistakeIndex !== -1) {
+                    const carriedChars = deliveredActions
+                        .slice(activeMistakeIndex + 1, index)
+                        .filter((candidate) => candidate?.char && candidate.char !== 'backspace' && !isMistakeOutputAction(candidate))
+                        .length;
+                    if (carriedChars >= 3) {
+                        stats.delayedRepairs += 1;
+                    }
+                }
+                activeMistakeIndex = -1;
+                continue;
+            }
+            if (kind === 'repair-backspace' || kind === 'repair-slip-backspace') {
+                stats.correctionBackspaces += 1;
+            }
+            if (kind === 'repair-slip-output') {
+                stats.repairSlipOutputs += 1;
+            }
+            if (isMistakeOutputAction(action)) {
+                stats.mistakeOutputs += 1;
+                if (activeMistakeIndex === -1) {
+                    activeMistakeIndex = index;
+                }
+            }
+            if (kind === 'word-variant-output') {
+                stats.wordLevelRepairs += 1;
+            }
+            if (kind === 'punct-substitute-output' || kind === 'multi-punct-output' || kind === 'space-before-punct-output') {
+                stats.punctuationRepairs += 1;
+            }
+            if (kind === 'double-space-output' || kind === 'space-before-punct-output') {
+                stats.spacingRepairs += 1;
+            }
+        }
+
+        return stats;
+    }
+
+    function isMistakeOutputAction(action) {
+        const kind = action?.kind || '';
+        return kind === 'mistake-output' ||
+            kind === 'word-variant-output' ||
+            kind === 'double-space-output' ||
+            kind === 'repeat-word-output' ||
+            kind === 'space-before-punct-output' ||
+            kind === 'punct-substitute-output' ||
+            kind === 'multi-punct-output';
+    }
+
     function buildActionPlan(text, targetDurationSeconds, seed, correctionIntensity = 'suggested') {
         const rng = createRng(seed || 1);
         const chars = Array.from(text);
-        const draftProfile = buildDraftMistakeProfile(chars, targetDurationSeconds, correctionIntensity);
+        const draftProfile = applyRunPatternToProfile(
+            buildDraftMistakeProfile(chars, targetDurationSeconds, correctionIntensity),
+            seed,
+            text
+        );
         const plannerState = createMistakePlannerState(chars, draftProfile);
         const actions = [];
         let typoCountdown = 0;
@@ -1910,11 +2570,11 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         const explicitSelectionBias = requestedIntensity === 'suggested'
             ? 1
             : requestedIntensity === 'high'
-                ? 1.36
+                ? 1.78
                 : requestedIntensity === 'low'
-                    ? 0.82
-                    : 1.04;
-        const combinedStrengthBias = clamp(suggestedStrengthBias * explicitSelectionBias, 0.72, 1.5);
+                    ? 0.88
+                    : 1.16;
+        const combinedStrengthBias = clamp(suggestedStrengthBias * explicitSelectionBias, 0.76, 2.08);
         const revisionCapacity = clamp(
             0.9 +
             (paragraphDensity * 0.18) +
@@ -1959,20 +2619,31 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             maxMistakes = Math.max(maxMistakes, sentenceDrivenFloor + paragraphDrivenFloor);
         }
         if (resolvedIntensity === 'medium' && charCount >= 260 && wordCount >= 42) {
-            maxMistakes = Math.max(maxMistakes, 2);
+            maxMistakes = Math.max(maxMistakes, 3);
+        }
+        if (requestedIntensity === 'medium' && !looksStructured) {
+            if (charCount >= 520 && wordCount >= 85) {
+                maxMistakes = Math.max(maxMistakes, 5);
+            }
+            if (charCount >= 1200 && wordCount >= 190) {
+                maxMistakes = Math.max(maxMistakes, 8);
+            }
         }
         if (resolvedIntensity === 'high' && charCount >= 220 && wordCount >= 34) {
-            maxMistakes = Math.max(maxMistakes, 3);
+            maxMistakes = Math.max(maxMistakes, 5);
         }
         if (requestedIntensity === 'high' && !looksStructured) {
             if (charCount >= 180 && wordCount >= 28) {
-                maxMistakes = Math.max(maxMistakes, 5);
-            }
-            if (charCount >= 520 && wordCount >= 85) {
                 maxMistakes = Math.max(maxMistakes, 8);
             }
+            if (charCount >= 520 && wordCount >= 85) {
+                maxMistakes = Math.max(maxMistakes, 15);
+            }
             if (charCount >= 1200 && wordCount >= 190) {
-                maxMistakes = Math.max(maxMistakes, 11);
+                maxMistakes = Math.max(maxMistakes, 24);
+            }
+            if (charCount >= 2200 && wordCount >= 340) {
+                maxMistakes = Math.max(maxMistakes, 34);
             }
         }
         if (requestedIntensity === 'low') {
@@ -1981,7 +2652,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             }
             maxMistakes = Math.min(maxMistakes, charCount >= 520 ? 2 : 1);
         }
-        maxMistakes = clamp(maxMistakes, 0, Math.round(interpolateIntensityValue(2, 6, 18, intensityBlend)));
+        maxMistakes = clamp(maxMistakes, 0, Math.round(interpolateIntensityValue(3, 10, 42, intensityBlend)));
 
         const baseMistakeChance = PROFILE.mistakeChance *
             paceFactor *
@@ -2001,11 +2672,11 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             maxMistakes <= 1
                 ? 1
                 : Math.min(
-                    Math.round(interpolateIntensityValue(4, 4, 6, intensityBlend)),
+                    Math.round(interpolateIntensityValue(4, 4, 8, intensityBlend)),
                     maxMistakes + (intensityBlend >= 0.72 ? 1 : 0) + (intensityProfile.segmentBias || 0)
                 ),
             1,
-            6
+            resolvedIntensity === 'high' ? 12 : resolvedIntensity === 'medium' ? 8 : 6
         );
         const sentenceRepeatAllowance = clamp(
             (intensityBlend >= 0.74 && charCount >= 900 ? 2 : 1) + (intensityProfile.sentenceAllowanceBonus || 0),
@@ -2056,32 +2727,37 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             maxMistakes,
             segmentCount,
             segmentBudgets: buildSegmentBudgets(segmentCount, maxMistakes),
-            minMistakeSpacingChars: Math.round(clamp(baseSpacing, 22, 108)),
+            minMistakeSpacingChars: Math.round(clamp(baseSpacing, resolvedIntensity === 'high' ? 10 : resolvedIntensity === 'medium' ? 18 : 24, 108)),
             edgeGuardRatio: resolvedIntensity === 'high' ? 0.05 : resolvedIntensity === 'low' ? 0.1 : 0.075,
             sentenceRepeatAllowance,
-            wordVariantChance: clamp(baseWordVariantChance, 0, resolvedIntensity === 'high' ? 0.28 : resolvedIntensity === 'medium' ? 0.12 : 0.03),
-            maxWordVariantMistakes: Math.round(baseMaxWordVariants * (intensityProfile.maxWordVariantScale || 1)),
+            sentenceSoftRepeatAllowance: requestedIntensity === 'high' && charCount >= 300 ? 3 : requestedIntensity === 'medium' && charCount >= 700 ? 2 : 1,
+            wordVariantChance: clamp(baseWordVariantChance, 0, resolvedIntensity === 'high' ? 0.56 : resolvedIntensity === 'medium' ? 0.2 : 0.03),
+            maxWordVariantMistakes: Math.max(
+                0,
+                Math.round(baseMaxWordVariants * (intensityProfile.maxWordVariantScale || 1)) +
+                    (requestedIntensity === 'high' && canUseWordVariants && charCount >= 320 ? 1 : 0)
+            ),
             guaranteedMistakeAllowed: maxMistakes > 0 && charCount > intensityProfile.guaranteedMinChars && !looksStructured,
-            transpositionChance: clamp((PROFILE.transpositionChance + (averageWordLength > 5.4 ? 0.04 : 0) - (symbolRatio * 0.2)) * intensityProfile.transpositionScale, 0.1, 0.3),
-            doubleTapChance: clamp((PROFILE.doubleTapChance + (paceFactor < 0.95 ? 0.03 : 0)) * intensityProfile.doubleTapScale, 0.06, 0.18),
-            casingErrorChance: clamp((PROFILE.casingErrorChance * technicalGuard * (1 - Math.min(uppercaseRatio * 0.7, 0.5))) * intensityProfile.casingScale, 0.02, 0.1),
-            omissionChance: clamp((PROFILE.omissionChance * proseFactor * clamp(averageWordLength / 5.1, 0.82, 1.12)) * intensityProfile.omissionScale, 0.07, 0.24),
-            spacingOmissionChance: clamp((PROFILE.spacingOmissionChance + (speedStress * 0.14)) * proseFactor * (intensityProfile.spacingOmissionScale || 1), 0.01, 0.18),
-            doubleSpaceChance: clamp((PROFILE.doubleSpaceChance + (speedStress * 0.1)) * proseFactor * (intensityProfile.doubleSpaceScale || 1), 0.01, 0.14),
-            punctuationOmissionChance: clamp((PROFILE.punctuationOmissionChance + (speedStress * 0.08)) * proseFactor * (intensityProfile.punctuationOmissionScale || 1), 0.01, 0.16),
-            punctuationSpacingChance: clamp((PROFILE.punctuationSpacingChance + (speedStress * 0.06)) * proseFactor * (intensityProfile.punctuationSpacingScale || 1), 0.005, 0.12),
-            punctuationSubstitutionChance: clamp((PROFILE.punctuationSubstitutionChance + (speedStress * 0.05)) * proseFactor * (intensityProfile.punctuationSubstitutionScale || 0), 0, 0.12),
-            multiPunctuationChance: clamp((PROFILE.multiPunctuationChance + (speedStress * 0.04)) * proseFactor * (intensityProfile.multiPunctuationScale || 0), 0, 0.1),
-            joinerOmissionChance: clamp((PROFILE.joinerOmissionChance + (speedStress * 0.04)) * proseFactor * (intensityProfile.joinerOmissionScale || 0), 0, 0.1),
-            repeatWordChance: clamp((PROFILE.repeatWordChance + (speedStress * 0.08)) * proseFactor * (intensityProfile.repeatWordScale || 0), 0, 0.14),
-            smallWordSkipChance: clamp((PROFILE.smallWordSkipChance + (speedStress * 0.06)) * proseFactor * (intensityProfile.smallWordSkipScale || 0), 0, 0.12),
-            keyboardSlipChance: clamp((0.22 + (averageWordLength > 4.5 ? 0.03 : 0)) * (intensityProfile.keyboardSlipScale || 1), 0.08, 0.38),
-            vowelSlipChance: clamp((0.1 + (averageWordLength > 4.8 ? 0.03 : 0) + (proseFactor > 1.02 ? 0.02 : 0)) * (intensityProfile.vowelSlipScale || 1), 0.03, 0.24),
-            softSlipChance: clamp((0.06 + (wordCount >= 40 ? 0.02 : 0)) * technicalGuard * (intensityProfile.softSlipScale || 1), 0.01, 0.18),
-            repairMessinessChance: clamp((PROFILE.repairMessinessChance + (speedStress * 0.08)) * (intensityProfile.repairMessinessScale || 0.4), 0.01, 0.24),
+            transpositionChance: clamp((PROFILE.transpositionChance + (averageWordLength > 5.4 ? 0.04 : 0) - (symbolRatio * 0.2)) * intensityProfile.transpositionScale, 0.1, resolvedIntensity === 'high' ? 0.44 : resolvedIntensity === 'medium' ? 0.34 : 0.3),
+            doubleTapChance: clamp((PROFILE.doubleTapChance + (paceFactor < 0.95 ? 0.03 : 0)) * intensityProfile.doubleTapScale, 0.06, resolvedIntensity === 'high' ? 0.31 : resolvedIntensity === 'medium' ? 0.22 : 0.18),
+            casingErrorChance: clamp((PROFILE.casingErrorChance * technicalGuard * (1 - Math.min(uppercaseRatio * 0.7, 0.5))) * intensityProfile.casingScale, 0.02, resolvedIntensity === 'high' ? 0.2 : resolvedIntensity === 'medium' ? 0.13 : 0.1),
+            omissionChance: clamp((PROFILE.omissionChance * proseFactor * clamp(averageWordLength / 5.1, 0.82, 1.12)) * intensityProfile.omissionScale, 0.07, resolvedIntensity === 'high' ? 0.42 : resolvedIntensity === 'medium' ? 0.3 : 0.24),
+            spacingOmissionChance: clamp((PROFILE.spacingOmissionChance + (speedStress * 0.14)) * proseFactor * (intensityProfile.spacingOmissionScale || 1), 0.01, resolvedIntensity === 'high' ? 0.36 : resolvedIntensity === 'medium' ? 0.24 : 0.18),
+            doubleSpaceChance: clamp((PROFILE.doubleSpaceChance + (speedStress * 0.1)) * proseFactor * (intensityProfile.doubleSpaceScale || 1), 0.01, resolvedIntensity === 'high' ? 0.3 : resolvedIntensity === 'medium' ? 0.2 : 0.14),
+            punctuationOmissionChance: clamp((PROFILE.punctuationOmissionChance + (speedStress * 0.08)) * proseFactor * (intensityProfile.punctuationOmissionScale || 1), 0.01, resolvedIntensity === 'high' ? 0.36 : resolvedIntensity === 'medium' ? 0.23 : 0.16),
+            punctuationSpacingChance: clamp((PROFILE.punctuationSpacingChance + (speedStress * 0.06)) * proseFactor * (intensityProfile.punctuationSpacingScale || 1), 0.005, resolvedIntensity === 'high' ? 0.29 : resolvedIntensity === 'medium' ? 0.17 : 0.12),
+            punctuationSubstitutionChance: clamp((PROFILE.punctuationSubstitutionChance + (speedStress * 0.05)) * proseFactor * (intensityProfile.punctuationSubstitutionScale || 0), 0, resolvedIntensity === 'high' ? 0.3 : resolvedIntensity === 'medium' ? 0.17 : 0.12),
+            multiPunctuationChance: clamp((PROFILE.multiPunctuationChance + (speedStress * 0.04)) * proseFactor * (intensityProfile.multiPunctuationScale || 0), 0, resolvedIntensity === 'high' ? 0.26 : resolvedIntensity === 'medium' ? 0.14 : 0.1),
+            joinerOmissionChance: clamp((PROFILE.joinerOmissionChance + (speedStress * 0.04)) * proseFactor * (intensityProfile.joinerOmissionScale || 0), 0, resolvedIntensity === 'high' ? 0.24 : resolvedIntensity === 'medium' ? 0.14 : 0.1),
+            repeatWordChance: clamp((PROFILE.repeatWordChance + (speedStress * 0.08)) * proseFactor * (intensityProfile.repeatWordScale || 0), 0, resolvedIntensity === 'high' ? 0.34 : resolvedIntensity === 'medium' ? 0.2 : 0.14),
+            smallWordSkipChance: clamp((PROFILE.smallWordSkipChance + (speedStress * 0.06)) * proseFactor * (intensityProfile.smallWordSkipScale || 0), 0, resolvedIntensity === 'high' ? 0.29 : resolvedIntensity === 'medium' ? 0.17 : 0.12),
+            keyboardSlipChance: clamp((0.22 + (averageWordLength > 4.5 ? 0.03 : 0)) * (intensityProfile.keyboardSlipScale || 1), 0.08, resolvedIntensity === 'high' ? 0.62 : resolvedIntensity === 'medium' ? 0.44 : 0.38),
+            vowelSlipChance: clamp((0.1 + (averageWordLength > 4.8 ? 0.03 : 0) + (proseFactor > 1.02 ? 0.02 : 0)) * (intensityProfile.vowelSlipScale || 1), 0.03, resolvedIntensity === 'high' ? 0.44 : resolvedIntensity === 'medium' ? 0.3 : 0.24),
+            softSlipChance: clamp((0.06 + (wordCount >= 40 ? 0.02 : 0)) * technicalGuard * (intensityProfile.softSlipScale || 1), 0.01, resolvedIntensity === 'high' ? 0.36 : resolvedIntensity === 'medium' ? 0.22 : 0.18),
+            repairMessinessChance: clamp((PROFILE.repairMessinessChance + (speedStress * 0.08)) * (intensityProfile.repairMessinessScale || 0.4), 0.01, resolvedIntensity === 'high' ? 0.46 : resolvedIntensity === 'medium' ? 0.28 : 0.24),
             immediateRepairChance: clamp(0.34 - ((paceFactor - 1) * 0.18) + intensityProfile.immediateRepairOffset, 0.14, 0.44),
             preferWordBoundaryChance: clamp(0.48 + ((proseFactor - 1) * 0.5) + intensityProfile.wordBoundaryOffset, 0.36, 0.72),
-            repairDepthFactor: clamp((0.45 + ((paceFactor - 1) * 0.3) + ((proseFactor - 1) * 0.4)) * intensityProfile.repairDepthScale, 0.34, 0.84),
+            repairDepthFactor: clamp((0.45 + ((paceFactor - 1) * 0.3) + ((proseFactor - 1) * 0.4)) * intensityProfile.repairDepthScale, 0.34, resolvedIntensity === 'high' ? 1.08 : resolvedIntensity === 'medium' ? 0.9 : 0.84),
             noticePauseFactor: clamp((0.95 + ((paceFactor - 1) * 0.45)) * intensityProfile.noticePauseScale, 0.86, 1.24),
             realignPauseFactor: clamp((0.92 + ((paceFactor - 1) * 0.28)) * intensityProfile.realignPauseScale, 0.86, 1.16),
             repairAfterExtraScale: intensityProfile.repairAfterExtraScale || 1,
@@ -2092,7 +2768,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
                     (sentenceDensity * 0.06)) *
                     (intensityProfile.lingeringRepairScale || 0.1),
                 0.01,
-                0.48
+                resolvedIntensity === 'high' ? 0.62 : 0.5
             ),
             sentenceCarryChance: clamp(
                 (interpolateIntensityValue(0.01, 0.06, 0.18, intensityBlend) +
@@ -2100,11 +2776,147 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
                     ((analysis.averageSentenceWordCount >= 12 ? 1 : 0) * 0.03)) *
                     (intensityProfile.sentenceCarryScale || 0.02),
                 0,
-                0.18
+                resolvedIntensity === 'high' ? 0.3 : 0.2
             ),
             wordVariantDelayScale: intensityProfile.wordVariantDelayScale || 1,
             cadenceProfile: buildCadenceProfile(analysis, targetDurationSeconds)
         };
+    }
+
+    function applyRunPatternToProfile(draftProfile, seed, text) {
+        if (!draftProfile || draftProfile.looksStructured) {
+            return draftProfile;
+        }
+
+        const pattern = buildRunPatternProfile(seed, text, draftProfile);
+        const profile = {
+            ...draftProfile,
+            runPattern: pattern,
+            baseMistakeChance: draftProfile.baseMistakeChance * pattern.chanceMultiplier,
+            cooldownChars: Math.max(24, Math.round(draftProfile.cooldownChars * pattern.cooldownMultiplier)),
+            minMistakeSpacingChars: Math.max(8, Math.round(draftProfile.minMistakeSpacingChars * pattern.spacingMultiplier)),
+            immediateRepairChance: clamp(draftProfile.immediateRepairChance + pattern.immediateRepairShift, 0.08, 0.52),
+            preferWordBoundaryChance: clamp(draftProfile.preferWordBoundaryChance + pattern.wordBoundaryShift, 0.26, 0.84),
+            lingeringRepairChance: clamp(draftProfile.lingeringRepairChance * pattern.lingeringMultiplier, 0, 0.72),
+            sentenceCarryChance: clamp(draftProfile.sentenceCarryChance * pattern.sentenceCarryMultiplier, 0, 0.36),
+            repairMessinessChance: clamp(draftProfile.repairMessinessChance * pattern.messinessMultiplier, 0.01, 0.56),
+            wordVariantChance: clamp(draftProfile.wordVariantChance * pattern.wordVariantMultiplier, 0, 0.68),
+            cadenceProfile: applyRunPatternToCadence(draftProfile.cadenceProfile, pattern)
+        };
+
+        return profile;
+    }
+
+    function buildRunPatternProfile(seed, text, draftProfile) {
+        const hash = hashTextForPattern(text);
+        const rng = createRng(((Number(seed) || 1) ^ hash ^ 0x9E3779B9) >>> 0);
+        const archetypes = [
+            {
+                id: 'quick-cleanups',
+                familyBias: { letter: 1.12, spacing: 0.88, punctuation: 0.94, joiner: 0.9, wordVariant: 0.76 },
+                immediateRepairShift: 0.07,
+                lingeringMultiplier: 0.7,
+                sentenceCarryMultiplier: 0.68,
+                messinessMultiplier: 0.82,
+                cooldownMultiplier: 0.94,
+                spacingMultiplier: 0.96
+            },
+            {
+                id: 'late-review',
+                familyBias: { letter: 0.92, spacing: 1.04, punctuation: 1.14, joiner: 1.02, wordVariant: 1.2 },
+                immediateRepairShift: -0.09,
+                lingeringMultiplier: 1.42,
+                sentenceCarryMultiplier: 1.34,
+                messinessMultiplier: 1.12,
+                cooldownMultiplier: 1.03,
+                spacingMultiplier: 1.08
+            },
+            {
+                id: 'spacing-heavy',
+                familyBias: { letter: 0.86, spacing: 1.44, punctuation: 0.96, joiner: 1.08, wordVariant: 0.88 },
+                immediateRepairShift: -0.02,
+                lingeringMultiplier: 1.08,
+                sentenceCarryMultiplier: 1.02,
+                messinessMultiplier: 0.94,
+                cooldownMultiplier: 0.92,
+                spacingMultiplier: 0.9
+            },
+            {
+                id: 'punctuation-pass',
+                familyBias: { letter: 0.86, spacing: 0.96, punctuation: 1.46, joiner: 1.18, wordVariant: 0.92 },
+                immediateRepairShift: -0.04,
+                lingeringMultiplier: 1.16,
+                sentenceCarryMultiplier: 1.2,
+                messinessMultiplier: 1.06,
+                cooldownMultiplier: 0.96,
+                spacingMultiplier: 0.96
+            },
+            {
+                id: 'word-choice-pass',
+                familyBias: { letter: 0.82, spacing: 0.9, punctuation: 1, joiner: 0.96, wordVariant: 1.52 },
+                immediateRepairShift: -0.08,
+                lingeringMultiplier: 1.28,
+                sentenceCarryMultiplier: 1.22,
+                messinessMultiplier: 1.18,
+                cooldownMultiplier: 1.08,
+                spacingMultiplier: 1.04
+            },
+            {
+                id: 'keyboard-slips',
+                familyBias: { letter: 1.42, spacing: 0.9, punctuation: 0.84, joiner: 0.88, wordVariant: 0.82 },
+                immediateRepairShift: 0.02,
+                lingeringMultiplier: 0.92,
+                sentenceCarryMultiplier: 0.86,
+                messinessMultiplier: 1.24,
+                cooldownMultiplier: 0.88,
+                spacingMultiplier: 0.86
+            }
+        ];
+        const archetype = archetypes[Math.floor(rng() * archetypes.length)] || archetypes[0];
+        const intensityLift = draftProfile.resolvedIntensity === 'high' ? 1.08 : draftProfile.resolvedIntensity === 'medium' ? 1 : 0.92;
+        return {
+            id: archetype.id,
+            familyBias: archetype.familyBias,
+            immediateRepairShift: archetype.immediateRepairShift + ((rng() - 0.5) * 0.04),
+            wordBoundaryShift: (rng() - 0.5) * 0.12,
+            lingeringMultiplier: archetype.lingeringMultiplier * (0.86 + (rng() * 0.34)) * intensityLift,
+            sentenceCarryMultiplier: archetype.sentenceCarryMultiplier * (0.84 + (rng() * 0.36)) * intensityLift,
+            messinessMultiplier: archetype.messinessMultiplier * (0.82 + (rng() * 0.42)) * intensityLift,
+            wordVariantMultiplier: (archetype.familyBias.wordVariant || 1) * (0.78 + (rng() * 0.54)),
+            chanceMultiplier: (0.88 + (rng() * 0.28)) * intensityLift,
+            cooldownMultiplier: archetype.cooldownMultiplier * (0.84 + (rng() * 0.32)),
+            spacingMultiplier: archetype.spacingMultiplier * (0.82 + (rng() * 0.36)),
+            cadenceMultiplier: 0.86 + (rng() * 0.32),
+            pauseJitterMultiplier: 0.84 + (rng() * 0.36)
+        };
+    }
+
+    function applyRunPatternToCadence(cadenceProfile, pattern) {
+        if (!cadenceProfile || !pattern) {
+            return cadenceProfile;
+        }
+
+        return {
+            ...cadenceProfile,
+            jitterRange: clamp(cadenceProfile.jitterRange * pattern.pauseJitterMultiplier, 0.04, 0.26),
+            waveStrength: clamp(cadenceProfile.waveStrength * pattern.cadenceMultiplier, 0.025, 0.12),
+            connectivePauseChance: clamp(cadenceProfile.connectivePauseChance * pattern.cadenceMultiplier, 0.03, 0.42),
+            burstPauseBase: cadenceProfile.burstPauseBase * pattern.pauseJitterMultiplier,
+            thoughtPauseBase: cadenceProfile.thoughtPauseBase * pattern.pauseJitterMultiplier,
+            paragraphPauseBase: cadenceProfile.paragraphPauseBase * pattern.pauseJitterMultiplier
+        };
+    }
+
+    function hashTextForPattern(text) {
+        const source = String(text || '');
+        let hash = 2166136261;
+        const stride = Math.max(1, Math.floor(source.length / 256));
+        for (let index = 0; index < source.length; index += stride) {
+            hash ^= source.charCodeAt(index);
+            hash = Math.imul(hash, 16777619);
+        }
+        hash ^= source.length;
+        return hash >>> 0;
     }
 
     function buildSafeActionPlan(text, targetDurationSeconds, seed, draftProfile = null) {
@@ -2350,6 +3162,10 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             sentenceCounts: new Map(),
             lastMistakeIndex: -100000,
             recentTypes: [],
+            recentFamilies: [],
+            typeCounts: new Map(),
+            familyCounts: new Map(),
+            runPattern: draftProfile.runPattern || null,
             wordVariantCount: 0
         };
     }
@@ -2477,7 +3293,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         }
 
         const originalWord = chars.slice(index, end).join('');
-        if (!/^[A-Za-z]+$/.test(originalWord) || originalWord.length < 4 || originalWord.length > 10) {
+        if (!/^[A-Za-z]+$/.test(originalWord) || originalWord.length < 4 || originalWord.length > 15) {
             return null;
         }
 
@@ -2634,7 +3450,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             return null;
         }
 
-        if (!COMMON_SMALL_WORDS.has(word.word.toLowerCase()) || word.word.length > 3 || word.word !== word.word.toLowerCase()) {
+        if (!COMMON_SMALL_WORDS.has(word.word.toLowerCase()) || word.word.length > 4 || word.word !== word.word.toLowerCase()) {
             return null;
         }
 
@@ -2824,7 +3640,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             return false;
         }
 
-        if (context.kind === 'small-word-skip' && (!context.nextWord || context.word?.word.length > 3)) {
+        if (context.kind === 'small-word-skip' && (!context.nextWord || context.word?.word.length > 4)) {
             return false;
         }
 
@@ -2836,7 +3652,11 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
 
         const sentenceId = plannerState.sentenceIds[index] ?? 0;
         const sentenceLength = plannerState.sentenceLengths.get(sentenceId) || 0;
-        const sentenceBudget = sentenceLength >= 140 ? draftProfile.sentenceRepeatAllowance : 1;
+        const sentenceBudget = sentenceLength >= 140
+            ? draftProfile.sentenceRepeatAllowance
+            : sentenceLength >= 70
+                ? draftProfile.sentenceSoftRepeatAllowance || 1
+                : 1;
         if ((plannerState.sentenceCounts.get(sentenceId) || 0) >= sentenceBudget) {
             return false;
         }
@@ -2889,15 +3709,22 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
     function noteMistakeScheduled(plannerState, index, context, type) {
         const sentenceId = plannerState.sentenceIds[index] ?? 0;
         const segmentIndex = getSegmentIndex(index, plannerState.sentenceIds.length || 1, plannerState.segmentCounts.length || 1);
+        const family = getMistakeFamily(type);
         plannerState.segmentCounts[segmentIndex] = (plannerState.segmentCounts[segmentIndex] || 0) + 1;
         plannerState.sentenceCounts.set(sentenceId, (plannerState.sentenceCounts.get(sentenceId) || 0) + 1);
         plannerState.lastMistakeIndex = index;
         if (type === 'word-variant') {
             plannerState.wordVariantCount += 1;
         }
+        plannerState.typeCounts.set(type, (plannerState.typeCounts.get(type) || 0) + 1);
+        plannerState.familyCounts.set(family, (plannerState.familyCounts.get(family) || 0) + 1);
         plannerState.recentTypes.push(type);
         if (plannerState.recentTypes.length > 3) {
             plannerState.recentTypes.shift();
+        }
+        plannerState.recentFamilies.push(family);
+        if (plannerState.recentFamilies.length > 4) {
+            plannerState.recentFamilies.shift();
         }
     }
 
@@ -3073,7 +3900,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         }
 
         if (context.kind === 'punctuation') {
-            return planPunctuationMistake(index, rng, baseDelay, context, draftProfile);
+            return planPunctuationMistake(index, rng, baseDelay, context, draftProfile, plannerState);
         }
 
         if (context.kind === 'joiner') {
@@ -3190,7 +4017,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         };
     }
 
-    function planPunctuationMistake(index, rng, baseDelay, context, draftProfile) {
+    function planPunctuationMistake(index, rng, baseDelay, context, draftProfile, plannerState) {
         const weights = [];
         const clausePunctuation = context.char === ',' || context.char === ';' || context.char === ':';
         const sentencePunctuation = context.char === '.' || context.char === '!' || context.char === '?';
@@ -3216,7 +4043,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             weights.push({ type: 'multi-punct', weight: draftProfile.multiPunctuationChance });
         }
 
-        const selectedType = pickWeightedType(rng, weights, null, 'punct-omit');
+        const selectedType = pickWeightedType(rng, weights, plannerState, 'punct-omit');
         if (selectedType === 'space-before-punct') {
             return {
                 outputs: [
@@ -3430,16 +4257,72 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             return fallbackType;
         }
 
-        const totalWeight = weights.reduce((total, entry) => total + entry.weight, 0);
+        const adjustedWeights = adjustMistakeWeights(weights, plannerState, rng);
+        const totalWeight = adjustedWeights.reduce((total, entry) => total + entry.weight, 0);
+        if (totalWeight <= 0) {
+            return fallbackType;
+        }
         let weightedPick = (plannerState ? pickMistakeVariation(rng, plannerState) : rng()) * totalWeight;
-        for (const entry of weights) {
+        for (const entry of adjustedWeights) {
             weightedPick -= entry.weight;
             if (weightedPick <= 0) {
                 return entry.type;
             }
         }
 
-        return weights[weights.length - 1].type;
+        return adjustedWeights[adjustedWeights.length - 1].type;
+    }
+
+    function adjustMistakeWeights(weights, plannerState, rng) {
+        if (!plannerState) {
+            return weights;
+        }
+
+        const pattern = plannerState.runPattern || null;
+        const recentTypes = plannerState.recentTypes || [];
+        const recentFamilies = plannerState.recentFamilies || [];
+        return weights.map((entry) => {
+            const type = entry.type;
+            const family = getMistakeFamily(type);
+            const typeCount = plannerState.typeCounts?.get(type) || 0;
+            const familyCount = plannerState.familyCounts?.get(family) || 0;
+            const lastType = recentTypes[recentTypes.length - 1] || '';
+            const lastFamily = recentFamilies[recentFamilies.length - 1] || '';
+            let weight = Math.max(0, entry.weight || 0);
+            weight *= pattern?.familyBias?.[family] || 1;
+            weight *= 0.86 + (rng() * 0.28);
+            weight *= 1 / (1 + (typeCount * 0.22) + (familyCount * 0.08));
+            if (type === lastType) {
+                weight *= 0.28;
+            } else if (recentTypes.includes(type)) {
+                weight *= 0.62;
+            }
+            if (family === lastFamily) {
+                weight *= 0.68;
+            } else if (recentFamilies.includes(family)) {
+                weight *= 0.82;
+            }
+            return {
+                ...entry,
+                weight
+            };
+        });
+    }
+
+    function getMistakeFamily(type) {
+        if (type === 'word-variant') {
+            return 'wordVariant';
+        }
+        if (type === 'space-omit' || type === 'double-space' || type === 'repeat-word' || type === 'small-word-skip') {
+            return 'spacing';
+        }
+        if (type === 'punct-omit' || type === 'space-before-punct' || type === 'punct-substitute' || type === 'multi-punct') {
+            return 'punctuation';
+        }
+        if (type === 'apostrophe-omit' || type === 'hyphen-omit') {
+            return 'joiner';
+        }
+        return 'letter';
     }
 
     function planWordVariantMistake(index, rng, baseDelay, context, draftProfile) {
@@ -4146,6 +5029,9 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             stopRequested: false,
             paused: false,
             pauseStartedAtMs: 0,
+            pauseCount: 0,
+            timerDriftAdjustments: 0,
+            timerDriftMs: 0,
             lockedElement: null,
             lastCompletionVerification: null,
             lastReportedAt: 0,
@@ -4154,6 +5040,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
     }
 
     function resetRunner() {
+        clearPendingInterferenceCheck();
         runner = createIdleRunner();
     }
 
@@ -4178,11 +5065,20 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         return Math.min(max, Math.max(min, value));
     }
 
+    function roundStat(value) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+            return 0;
+        }
+        return Math.round(numeric * 10) / 10;
+    }
+
     function sleep(milliseconds) {
         return new Promise((resolve) => setTimeout(resolve, milliseconds));
     }
 
     function disposeRunnerController() {
+        clearPendingInterferenceCheck();
         runner.stopRequested = true;
         runner.paused = false;
         runner.pauseStartedAtMs = 0;
@@ -4202,7 +5098,9 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         validateActionPlan,
         replayActionPlan,
         countRepairSequences,
-        sumActionDelays
+        sumActionDelays,
+        buildRunActionStats,
+        eventTargetsGoogleDocsTypingSurface
     });
 
     globalThis.__writerdripRunnerController = Object.freeze({

@@ -50,6 +50,7 @@ async function validateManifest() {
     assert.equal(manifest.manifest_version, 3, 'Manifest must stay on MV3.');
     assert.equal(manifest.background?.service_worker, 'background.js', 'Background worker should stay on background.js.');
     assert.equal(manifest.action?.default_popup, 'popup.html', 'Popup should stay on popup.html.');
+    assert.ok(manifest.permissions?.includes('power'), 'Manifest should include the power permission so active drips can prevent local system sleep.');
 }
 
 async function validatePopupHtml() {
@@ -61,14 +62,27 @@ async function validatePopupHtml() {
     );
     assert.match(popupHtml, /id="preflightPanel"/, 'popup.html should keep the preflight panel.');
     assert.match(popupHtml, /id="preflightToggle"/, 'popup.html should keep the preflight panel toggle.');
+    assert.match(popupHtml, /id="correctionPreviewPanel"/, 'popup.html should include the correction preview panel.');
+    assert.match(popupHtml, /id="correctionPreviewToggle"/, 'popup.html should include the correction preview toggle.');
     assert.match(popupHtml, /id="recoveryPanel"/, 'popup.html should keep the recovery panel.');
     assert.match(popupHtml, /id="recoveryToggle"/, 'popup.html should keep the recovery panel toggle.');
     assert.match(popupHtml, /id="recoveryChecks"/, 'popup.html should keep the recovery confidence checks list.');
+    assert.match(popupHtml, /id="runSummaryPanel"/, 'popup.html should include the post-run summary panel.');
+    assert.match(popupHtml, /id="runSummaryToggle"/, 'popup.html should include the run summary toggle.');
     assert.match(popupHtml, /id="completionPanel"/, 'popup.html should keep the completion panel.');
     assert.match(popupHtml, /id="completionToggle"/, 'popup.html should keep the completion panel toggle.');
+    assert.match(popupHtml, /id="copyDebugBtn"/, 'popup.html should include a copy debug report button.');
+    assert.match(popupHtml, /id="keepAwakeToggle"/, 'popup.html should include the keep-awake preference toggle.');
+    assert.match(popupHtml, /Keep computer awake/, 'popup.html should label the keep-awake preference clearly.');
+    assert.match(popupHtml, /Duration \(minutes\)/, 'popup.html should label the duration input in minutes.');
+    assert.match(popupHtml, /Enter the duration as minutes/, 'popup.html should tell users to enter custom duration values as minutes.');
     assert.doesNotMatch(popupHtml, /id="scheduleGroup"/, 'popup.html should not ship the removed run window controls.');
     assert.doesNotMatch(popupHtml, /id="scheduleStart"/, 'popup.html should not keep the removed schedule start time input.');
     assert.doesNotMatch(popupHtml, /id="scheduleEnd"/, 'popup.html should not keep the removed schedule end time input.');
+
+    const popupSource = await fs.readFile(path.join(rootDir, 'popup.js'), 'utf8');
+    assert.match(popupSource, /duration in minutes/i, 'popup.js validation copy should mention duration values are entered in minutes.');
+    assert.match(popupSource, /Enter minutes only/i, 'popup.js invalid-duration guidance should reject hour text and ask for minutes.');
 
     const backgroundSource = await fs.readFile(path.join(rootDir, 'background.js'), 'utf8');
     assert.match(
@@ -76,6 +90,7 @@ async function validatePopupHtml() {
         /files:\s*\[\s*'shared\.js'\s*,\s*'content\.js'\s*\]/,
         'background.js must inject shared.js before content.js.'
     );
+    assert.match(backgroundSource, /KEEP_AWAKE_ENABLED_KEY/, 'background.js should use the shared keep-awake preference key.');
 }
 
 async function validateSyntax() {
@@ -161,6 +176,107 @@ async function validateBackgroundRuntime() {
 
     const hooks = backgroundSandbox.__writerdripBackgroundTestHooks;
     assert.ok(hooks, 'background.js should expose background test hooks.');
+    assert.deepEqual(
+        [...backgroundSandbox.WriterDripShared.RECOVERABLE_ATTENTION_CODES].sort(),
+        [
+            'editor-focus-failed',
+            'editor-not-ready',
+            'manual-interaction',
+            'tab-suspended',
+            'typing-context-lost'
+        ],
+        'Shared recoverable attention codes should include every state that asks users to click the Doc and resume.'
+    );
+    assert.equal(hooks.canResumeAttentionState('manual-interaction'), true, 'Background should allow manual-interaction sessions to run the resume confidence check.');
+    assert.equal(hooks.canResumeAttentionState('typing-context-lost'), true, 'Background should allow typing-context-lost sessions to run the resume confidence check.');
+
+    const keepAwakeSession = hooks.normalizeSession(6, {
+        activeJob: hooks.createJob({
+            text: 'A running draft should request local keep-awake protection.',
+            docKey: 'awake-doc',
+            durationMins: 10,
+            correctionIntensity: 'medium'
+        }),
+        activeRunId: 'run_awake',
+        state: hooks.SESSION_STATES.RUNNING
+    });
+    await hooks.syncPowerKeepAwake({ 6: keepAwakeSession });
+    assert.deepEqual(
+        backgroundSandbox.__powerEvents.at(-1),
+        { type: 'request', level: 'system' },
+        'Running local drips should request system keep-awake protection.'
+    );
+    await backgroundSandbox.chrome.storage.local.set({ writerdripKeepAwakeEnabled: false });
+    await hooks.syncPowerKeepAwake({ 6: keepAwakeSession });
+    assert.deepEqual(
+        backgroundSandbox.__powerEvents.at(-1),
+        { type: 'release' },
+        'Turning keep-awake off during a running drip should release system keep-awake protection.'
+    );
+    await backgroundSandbox.chrome.storage.local.set({ writerdripKeepAwakeEnabled: true });
+    await hooks.syncPowerKeepAwake({ 6: keepAwakeSession });
+    keepAwakeSession.state = hooks.SESSION_STATES.PAUSED;
+    await hooks.syncPowerKeepAwake({ 6: keepAwakeSession });
+    assert.deepEqual(
+        backgroundSandbox.__powerEvents.at(-1),
+        { type: 'release' },
+        'Paused drips should release keep-awake protection so WriterDrip does not drain battery while paused.'
+    );
+    await backgroundSandbox.chrome.storage.local.set({ writerdripKeepAwakeEnabled: false });
+    keepAwakeSession.state = hooks.SESSION_STATES.RUNNING;
+    await hooks.syncPowerKeepAwake({ 6: keepAwakeSession });
+    assert.notDeepEqual(
+        backgroundSandbox.__powerEvents.at(-1),
+        { type: 'request', level: 'system' },
+        'Disabled keep-awake preference should prevent new system keep-awake requests.'
+    );
+
+    const manualAttentionSession = hooks.normalizeSession(7, {
+        activeJob: hooks.createJob({
+            text: 'A paused draft that should be recoverable after manual interaction.',
+            docKey: 'test',
+            durationMins: 10,
+            correctionIntensity: 'medium'
+        }),
+        activeRunId: 'run_manual',
+        state: hooks.SESSION_STATES.ATTENTION,
+        attentionCode: 'manual-interaction',
+        attentionMessage: 'Manual interaction was detected.'
+    });
+    const manualResumeReport = await hooks.runResumeConfidenceCheck(7, manualAttentionSession);
+    assert.equal(manualResumeReport.canResume, true, 'Manual-interaction attention should pass resume confidence when the same Doc is ready again.');
+    assert.equal(
+        manualResumeReport.checks.some((check) => check.id === 'resume-state' && check.pass),
+        true,
+        'Manual-interaction resume confidence should pass the resume-state check.'
+    );
+
+    const typingContextSession = hooks.normalizeSession(8, {
+        activeJob: hooks.createJob({
+            text: 'A paused draft that should be recoverable after focus comes back.',
+            docKey: 'test',
+            durationMins: 10,
+            correctionIntensity: 'medium'
+        }),
+        activeRunId: 'run_context',
+        state: hooks.SESSION_STATES.ATTENTION,
+        attentionCode: 'typing-context-lost',
+        attentionMessage: 'Typing context was lost.'
+    });
+    const typingResumeReport = await hooks.runResumeConfidenceCheck(8, typingContextSession);
+    assert.equal(typingResumeReport.canResume, true, 'Typing-context-lost attention should pass resume confidence when the same Doc is ready again.');
+
+    const repeatedJobSeeds = new Set();
+    for (let index = 0; index < 24; index += 1) {
+        const seededJob = hooks.createJob({
+            text: 'A repeated draft should still get a fresh run seed each time.',
+            docKey: 'seed-doc',
+            durationMins: 10,
+            correctionIntensity: 'high'
+        });
+        repeatedJobSeeds.add(seededJob.seed);
+    }
+    assert.ok(repeatedJobSeeds.size >= 22, 'Repeated jobs should receive fresh high-entropy seeds.');
 
     const session = hooks.normalizeSession(1, {
         activeJob: hooks.createJob({
@@ -195,6 +311,38 @@ async function validateBackgroundRuntime() {
     assert.equal(session.activeRunId, null, 'Completed runtime snapshots should clear the active run id.');
     assert.ok(session.lastCompletedJob, 'Completed runtime snapshots should preserve a summary of the completed job.');
     assert.equal(session.lastCompletedVerification?.verified, true, 'Completed runtime snapshots should preserve completion verification details.');
+    assert.ok(session.lastRunSummary, 'Completed runtime snapshots should preserve a redacted run summary.');
+    assert.equal(
+        JSON.stringify(session.lastRunSummary).includes('draft that should finish'),
+        false,
+        'Run summaries should not store raw draft text.'
+    );
+
+    const safetyPausedSession = hooks.normalizeSession(12, {
+        activeJob: hooks.createJob({
+            text: 'A draft that should soft pause instead of erroring after harmless interaction.',
+            docKey: 'pause-doc',
+            durationMins: 5,
+            correctionIntensity: 'medium'
+        }),
+        activeRunId: 'run_soft_pause',
+        state: hooks.SESSION_STATES.RUNNING,
+        progress: 0.2
+    });
+    hooks.applyRuntimeSnapshotToSession(safetyPausedSession, {
+        state: hooks.SESSION_STATES.PAUSED,
+        percent: 0.22,
+        eta: '04:12',
+        actionIndex: 12,
+        totalActions: 90,
+        pauseReason: {
+            code: 'manual-interaction',
+            message: 'Paused after a document-body click.'
+        }
+    });
+    assert.equal(safetyPausedSession.state, hooks.SESSION_STATES.PAUSED, 'Recoverable user interaction should be preserved as a paused session.');
+    assert.equal(safetyPausedSession.pauseReason?.code, 'manual-interaction', 'Soft pauses should preserve a safe pause reason for the popup.');
+    assert.equal(safetyPausedSession.lastError, null, 'Soft pauses should not look like runner errors.');
 
     const detachedSession = hooks.normalizeSession(2, {
         activeJob: hooks.createJob({
@@ -273,6 +421,76 @@ async function validateBackgroundRuntime() {
     assert.equal(completedFromProgress.activeRunId, null, 'Completed progress updates should clear the active run id even if the final completion message is missed.');
     assert.equal(completedFromProgress.state, hooks.SESSION_STATES.COMPLETE, 'Completed progress updates should move the session into the complete state.');
     assert.equal(completedFromProgress.lastCompletedVerification?.verified, true, 'Completed progress updates should preserve completion verification details.');
+    assert.ok(completedFromProgress.lastRunSummary, 'Completed progress updates should preserve a run summary.');
+    assert.equal(
+        JSON.stringify(completedFromProgress.lastRunSummary).includes('A draft that finishes'),
+        false,
+        'Progress-path run summaries should not store raw draft text.'
+    );
+
+    const sensitiveSession = hooks.normalizeSession(5, {
+        activeJob: hooks.createJob({
+            text: 'Secret draft phrase that must never appear in a debug report.',
+            docKey: 'secret-doc',
+            durationMins: 5,
+            correctionIntensity: 'high'
+        }),
+        activeRunId: 'run_secret',
+        state: hooks.SESSION_STATES.ATTENTION,
+        lastErrorCode: 'editor-not-ready',
+        lastError: 'Editor was not ready.'
+    });
+    const debugReport = hooks.buildDebugReport({
+        tabId: 5,
+        url: 'https://docs.google.com/document/d/secret-doc/edit',
+        tab: { id: 5, status: 'complete', url: 'https://docs.google.com/document/d/secret-doc/edit', discarded: false },
+        session: sensitiveSession,
+        popupContext: {
+            pageKind: 'google-doc',
+            selectedCorrectionIntensity: 'high',
+            durationValue: 5,
+            issueCode: 'editor-not-ready',
+            draftText: 'Secret draft phrase that must never appear in a debug report.',
+            draft: {
+                hasDraft: true,
+                wordCount: 10,
+                charCount: 60,
+                minimumDurationMins: 5,
+                recommendedDurationMins: 8,
+                suggestedCorrectionLabel: 'Secret debug label'
+            },
+            preflight: {
+                ready: false,
+                code: 'Secret preflight issue',
+                checks: [{ id: 'Secret check id with draft words', pass: false }]
+            }
+        }
+    });
+    const debugJson = JSON.stringify(debugReport);
+    assert.doesNotMatch(debugJson, /Secret draft phrase/i, 'Debug reports should exclude draft text even if the popup context accidentally includes it.');
+    assert.doesNotMatch(debugJson, /Secret debug label|Secret preflight|Secret check/i, 'Debug reports should redact unexpected popup diagnostic strings.');
+    assert.equal(debugReport.extension.version, '1.0.2', 'Debug reports should include the extension version.');
+    assert.equal(debugReport.session.issueCode, 'editor-not-ready', 'Debug reports should include the current issue code.');
+    assert.equal(debugReport.tab.docStatus.sameAsActiveJob, true, 'Debug reports should include same-Doc status without exposing the Doc id.');
+
+    const offsiteDebugReport = hooks.buildDebugReport({
+        tabId: 6,
+        url: 'https://mail.google.com/mail/u/0/#inbox',
+        tab: { id: 6, status: 'complete', url: 'https://mail.google.com/mail/u/0/#inbox', discarded: false },
+        session: hooks.normalizeSession(6, {}),
+        popupContext: {
+            pageKind: 'Secret page kind',
+            issueCode: 'Secret issue code',
+            draft: {
+                hasDraft: false,
+                suggestedCorrectionLabel: 'Secret label'
+            }
+        }
+    });
+    const offsiteDebugJson = JSON.stringify(offsiteDebugReport);
+    assert.equal(offsiteDebugReport.tab.urlKind, 'other-web-page', 'Debug reports should classify non-Doc URLs without exposing hostnames.');
+    assert.equal(offsiteDebugReport.popup.issueCode, 'runtime-error', 'Unexpected popup issue codes should be normalized.');
+    assert.doesNotMatch(offsiteDebugJson, /mail\.google|Secret/i, 'Debug reports should not leak offsite hostnames or unexpected popup strings.');
 
     backgroundSandbox.chrome.tabs.get = async (tabId) => {
         if (tabId === 11) {
@@ -315,6 +533,31 @@ async function validateBackgroundRuntime() {
     };
     const staleConflict = await hooks.findConflictingSessionForDoc(staleDocSessions, 22, 'dup-doc');
     assert.equal(staleConflict, null, 'Background runtime should ignore sessions whose original tab is no longer on the same Google Doc.');
+
+    let probeAttempts = 0;
+    let injectionCount = 0;
+    backgroundSandbox.chrome.tabs.get = async (tabId) => {
+        return { id: tabId, status: 'complete', url: 'https://docs.google.com/document/d/fresh-doc/edit', discarded: false };
+    };
+    backgroundSandbox.chrome.tabs.sendMessage = async (_tabId, message) => {
+        if (message.type === 'writerdrip:query-status') {
+            return { status: 'ok', runtime: { state: 'running', percent: 0, eta: '00:10', actionIndex: 0, totalActions: 1 } };
+        }
+        if (message.type === 'writerdrip:probe-editor') {
+            probeAttempts += 1;
+            return probeAttempts === 1
+                ? { status: 'error', message: 'Unknown runner message: writerdrip:probe-editor' }
+                : { status: 'ok', ready: true, message: 'Ready after refresh.', checks: [] };
+        }
+        return { status: 'ok' };
+    };
+    backgroundSandbox.chrome.scripting.executeScript = async () => {
+        injectionCount += 1;
+    };
+    const refreshedPreflight = await hooks.runPreflightCheck(99, 'fresh-doc');
+    assert.equal(refreshedPreflight.ready, true, 'Preflight should recover from a stale content runner by reinjecting once.');
+    assert.equal(probeAttempts, 2, 'Preflight should retry the original probe after refreshing the runner.');
+    assert.equal(injectionCount, 1, 'Preflight should reinject the runner once for stale content scripts.');
 }
 
 async function validatePopupRuntime() {
@@ -371,6 +614,105 @@ async function validatePopupRuntime() {
     assert.equal(normalizedResumeConfidence.canResume, true, 'Popup resume-confidence normalization should preserve the resumable state.');
     assert.equal(normalizedResumeConfidence.confidence, 'high', 'Popup resume-confidence normalization should preserve the confidence label.');
     assert.equal(normalizedResumeConfidence.checks.length, 1, 'Popup resume-confidence normalization should preserve recovery checks.');
+    assert.equal(
+        hooks.formatRecoveryConfidence({ canResume: true, confidence: 'high' }),
+        'Ready',
+        'Safe Resume should surface a clear ready state.'
+    );
+    assert.equal(
+        hooks.formatRecoveryConfidence({ canResume: false, confidence: 'blocked', code: 'page-changed' }),
+        'Doc changed',
+        'Safe Resume should distinguish changed document state.'
+    );
+    assert.equal(
+        hooks.formatRecoveryConfidence({ canResume: false, confidence: 'low', code: 'editor-not-ready' }),
+        'Needs click in Doc',
+        'Safe Resume should tell users when the editor needs a click.'
+    );
+    assert.equal(
+        hooks.formatRecoveryConfidence({ canResume: false, confidence: 'low', code: 'tab-suspended' }),
+        'Needs click in Doc',
+        'Safe Resume should treat suspended tabs as a click/reopen recovery path.'
+    );
+    assert.equal(
+        hooks.formatRecoveryConfidence({ canResume: false, confidence: 'low', code: 'manual-interaction' }),
+        'Needs click in Doc',
+        'Safe Resume should treat manual interaction as a Doc-click recovery path.'
+    );
+    assert.equal(hooks.canResumeAttentionState('manual-interaction'), true, 'Manual-interaction attention should be recoverable after the user reviews the Doc.');
+    assert.equal(hooks.canResumeAttentionState('typing-context-lost'), true, 'Lost typing context should be recoverable after closing competing editor fields.');
+    assert.match(
+        hooks.buildRecoveryWizard('manual-interaction').steps.join(' '),
+        /Resume if the document still looks correct/i,
+        'Manual-interaction recovery steps should guide users back to Resume instead of forcing restart.'
+    );
+    assert.equal(
+        hooks.shouldBlockResumeButton(true, { status: 'ready', report: { canResume: false, code: 'manual-interaction' } }),
+        false,
+        'A stale failed resume-confidence report should not disable the Resume button; clicking Resume forces a fresh check.'
+    );
+    assert.equal(
+        hooks.shouldBlockResumeButton(true, { status: 'loading', report: null }),
+        true,
+        'Resume should only be disabled while the fresh resume-confidence check is actively loading.'
+    );
+    assert.equal(
+        hooks.isSafetyPause(hooks.normalizePauseReason({ code: 'manual-interaction', message: 'Paused after a click.' })),
+        true,
+        'Popup should distinguish safety pauses from normal manual pauses.'
+    );
+    assert.equal(
+        hooks.isSafetyPause(hooks.normalizePauseReason({ code: 'manual-pause', message: 'Paused from the popup.' })),
+        false,
+        'Popup should keep normal user pauses distinct from safety pauses.'
+    );
+
+    const durationElement = popupSandbox.document.getElementById('duration');
+    durationElement.value = '12abc';
+    assert.equal(hooks.readDurationInputValue(null), null, 'Popup duration parsing should reject mixed numeric/text values.');
+    durationElement.value = '12.5';
+    assert.equal(hooks.readDurationInputValue(null), 12.5, 'Popup duration parsing should still accept numeric decimal input before normalization.');
+
+    const localDebugReport = hooks.buildLocalDebugReport({
+        pageKind: 'google-doc',
+        selectedCorrectionIntensity: 'medium',
+        durationValue: 12,
+        issueCode: 'editor-not-ready',
+        draftText: 'Secret popup draft phrase that should not be copied.',
+        draft: {
+            hasDraft: true,
+            wordCount: 9,
+            charCount: 52,
+            minimumDurationMins: 4,
+            recommendedDurationMins: 7,
+            suggestedCorrectionLabel: 'Secret popup label'
+        },
+        preflight: {
+            ready: false,
+            code: 'Secret popup issue',
+            checks: [{ id: 'Secret popup check', pass: false }]
+        }
+    });
+    assert.doesNotMatch(
+        JSON.stringify(localDebugReport),
+        /Secret popup draft phrase|Secret popup label|Secret popup issue|Secret popup check/i,
+        'Popup fallback debug reports should not include draft text or unexpected diagnostic strings.'
+    );
+    assert.equal(localDebugReport.extension.version, '1.0.2', 'Popup fallback debug reports should include the extension version.');
+    assert.equal(localDebugReport.popup.preflight.failedCheckIds[0], 'check-redacted', 'Popup fallback debug reports should redact unexpected failed check ids.');
+
+    const normalizedSummary = hooks.normalizeUiRunSummary({
+        wordCount: 12,
+        timerDriftAdjustments: 2,
+        delayedBySeconds: 17.4,
+        text: 'Secret run summary draft',
+        preview: 'Secret preview',
+        completionCheckPassed: true
+    });
+    assert.equal(normalizedSummary.wordCount, 12, 'Popup run summary normalization should preserve safe counts.');
+    assert.equal(normalizedSummary.timerDriftAdjustments, 2, 'Popup run summary normalization should preserve timer drift adjustment counts.');
+    assert.equal(normalizedSummary.delayedBySeconds, 17.4, 'Popup run summary normalization should preserve timer drift delay totals.');
+    assert.doesNotMatch(JSON.stringify(normalizedSummary), /Secret/i, 'Popup run summary normalization should drop unexpected text-like fields.');
 }
 
 async function validatePlanner() {
@@ -380,6 +722,31 @@ async function validatePlanner() {
 
     const hooks = sandbox.__writerdripTestHooks;
     assert.ok(hooks, 'content.js should expose planner test hooks.');
+
+    const fakeToolbarTarget = {
+        nodeType: 1,
+        parentElement: null,
+        matches() { return false; },
+        closest(selector) {
+            return selector.includes('.docs-toolbar') ? {} : null;
+        }
+    };
+    const fakePageTarget = {
+        nodeType: 1,
+        parentElement: null,
+        matches() { return false; },
+        closest(selector) {
+            return selector.includes('.kix-page') ? {} : null;
+        }
+    };
+    assert.equal(hooks.eventTargetsGoogleDocsTypingSurface(fakeToolbarTarget), false, 'Clicks in Google Docs toolbar chrome should not be treated as document-body typing interference.');
+    assert.equal(hooks.eventTargetsGoogleDocsTypingSurface(fakePageTarget), true, 'Clicks on the Google Docs page surface should still be treated as document-body interaction.');
+    const timerStats = hooks.buildRunActionStats([], null, {
+        timerDriftAdjustments: 3,
+        delayedBySeconds: 22.6
+    });
+    assert.equal(timerStats.timerDriftAdjustments, 3, 'Run stats should preserve timer drift adjustment counts.');
+    assert.equal(timerStats.delayedBySeconds, 22.6, 'Run stats should preserve timer drift delay totals.');
 
     const shared = sandbox.WriterDripShared;
     const scenarios = [
@@ -406,6 +773,12 @@ async function validatePlanner() {
             text: 'HTTP STATUS: 200 OK\nAPI_KEY=disabled\nUse the CONFIG object, not the legacy parser.',
             durationMins: 30,
             intensities: ['suggested', 'low', 'high']
+        },
+        {
+            label: 'protected-url-email-and-quotes',
+            text: 'Email test@example.com, keep https://example.com/path, quote "exact text", and leave CODE_VALUE=ready alone.',
+            durationMins: 120,
+            intensities: ['suggested', 'high']
         },
         {
             label: 'confusables',
@@ -435,6 +808,30 @@ async function validatePlanner() {
         const titleCaseWordVariants = actions.filter((action) => action?.kind === 'word-variant-output');
         assert.equal(titleCaseWordVariants.length, 0, 'TitleCase words should not trigger confusable-word substitutions.');
     }
+
+    const alreadyMistypedDraft = 'I definately wrote this becuase the seperate goverment calender felt importent and neccessary.';
+    for (let seed = 1; seed <= 80; seed += 1) {
+        const actions = hooks.buildActionPlan(alreadyMistypedDraft, 240 * 60, seed, 'high');
+        const replayed = hooks.replayActionPlan(actions);
+        assert.equal(replayed, alreadyMistypedDraft, `Already-mistyped draft ${seed} should still replay exactly.`);
+        const wordVariants = collectWordVariantOutputs(actions);
+        assert.equal(wordVariants.length, 0, 'One-way misspelling variants should not type a corrected word and then repair back to a misspelling.');
+    }
+
+    const phraseVariantBase = 'everyday everyone already thought something was alright because this sentence should stay exact.';
+    const phraseVariantDraft = [phraseVariantBase, phraseVariantBase, phraseVariantBase, phraseVariantBase].join(' ');
+    const phraseVariantOutputs = new Set();
+    for (let seed = 1; seed <= 140; seed += 1) {
+        const actions = hooks.buildActionPlan(phraseVariantDraft, 300 * 60, seed, 'high');
+        assert.equal(hooks.replayActionPlan(actions), phraseVariantDraft, `Phrase variant draft ${seed} should replay exactly.`);
+        for (const word of collectWordVariantOutputs(actions)) {
+            phraseVariantOutputs.add(word);
+        }
+    }
+    assert.ok(
+        ['every day', 'every one', 'all right', 'allready', 'somthing'].some((word) => phraseVariantOutputs.has(word)),
+        `Phrase-style variants should be supported safely. Saw: ${Array.from(phraseVariantOutputs).sort().join(', ')}`
+    );
 
     const lowercaseVariantText = 'The principal should advise the council about the weather before they alter the final effect of the plan.';
     const lowercaseVariantProfile = hooks.buildDraftMistakeProfile(Array.from(lowercaseVariantText.repeat(8)), 420 * 60, 'high');
@@ -481,6 +878,13 @@ async function validatePlanner() {
     );
     assert.ok(balancedLowDuration.recommendedDurationMins < balancedMediumDuration.recommendedDurationMins, 'Balanced prose should recommend more time for medium than low correction intensity.');
     assert.ok(balancedMediumDuration.recommendedDurationMins < balancedHighDuration.recommendedDurationMins, 'Balanced prose should recommend more time for high than medium correction intensity.');
+    const balancedPreviewModes = Object.fromEntries(balancedDraftAnalysis.correctionPreview.modes.map((mode) => [mode.id, mode]));
+    assert.ok(balancedPreviewModes.low.estimatedRepairs < balancedPreviewModes.medium.estimatedRepairs, 'Correction preview should show medium as more active than low.');
+    assert.ok(balancedPreviewModes.medium.estimatedRepairs < balancedPreviewModes.high.estimatedRepairs, 'Correction preview should show high as more active than medium.');
+    assert.ok(balancedPreviewModes.high.estimatedRepairs >= balancedPreviewModes.medium.estimatedRepairs * 1.8, 'Correction preview should show high as much stronger than medium.');
+    assert.ok(balancedPreviewModes.high.delayedRepairs >= balancedPreviewModes.medium.delayedRepairs, 'Correction preview should connect high mode to more delayed repairs.');
+    assert.equal(balancedPreviewModes.high.repairDepth, 'intense', 'Correction preview should label high as intense depth.');
+    assert.match(balancedDraftAnalysis.correctionPreview.selectedMode.summary, /repairs|pause/i, 'Correction preview should include a user-facing estimate summary.');
 
     const longDraftAnalysis = shared.analyzeDraftText(scenarios[1].text, scenarios[1].durationMins);
     assert.equal(longDraftAnalysis.suggestedCorrectionIntensity, 'medium', 'Long relaxed prose should stay below explicit high when suggested mode is being conservative.');
@@ -505,11 +909,14 @@ async function validatePlanner() {
 
     assert.ok(lowProfile.maxMistakes < mediumProfile.maxMistakes, 'Low intensity should budget fewer mistakes than medium on long prose.');
     assert.ok(mediumProfile.maxMistakes < highProfile.maxMistakes, 'High intensity should budget more mistakes than medium on long prose.');
+    assert.ok(highProfile.maxMistakes >= mediumProfile.maxMistakes * 4, 'High intensity should now have a substantially larger repair budget than medium.');
     assert.ok(lowProfile.cooldownChars > mediumProfile.cooldownChars, 'Low intensity should space mistakes farther apart than medium.');
     assert.ok(mediumProfile.cooldownChars > highProfile.cooldownChars, 'High intensity should allow tighter spacing than medium.');
     assert.ok(highProfile.minMistakeSpacingChars <= Math.round(mediumProfile.minMistakeSpacingChars * 0.45), 'High intensity should allow much tighter mistake spacing than medium.');
     assert.equal(lowProfile.wordVariantChance, 0, 'Low intensity should disable larger word-level variants.');
     assert.ok(highProfile.wordVariantChance > mediumProfile.wordVariantChance, 'High intensity should allow stronger word-level variant behavior than medium.');
+    assert.ok(highProfile.wordVariantChance >= 0.35, 'High intensity should make word-level variants noticeably available on prose drafts.');
+    assert.ok(highProfile.maxWordVariantMistakes >= 3, 'High intensity should allow multiple common word-level mistakes when the draft supports them.');
     assert.ok(highProfile.vowelSlipChance > mediumProfile.vowelSlipChance, 'High intensity should allow more vowel-drift mistakes than medium.');
     assert.ok(mediumProfile.vowelSlipChance > lowProfile.vowelSlipChance, 'Medium intensity should allow more vowel-drift mistakes than low.');
     assert.ok(highProfile.softSlipChance > mediumProfile.softSlipChance, 'High intensity should allow more nearby-letter slips than medium.');
@@ -594,9 +1001,10 @@ async function validatePlanner() {
     assert.ok(intensityAverages.medium.repairs < intensityAverages.high.repairs, 'High intensity should schedule more repair sequences than medium.');
     assert.ok(intensityAverages.low.backspaces < intensityAverages.medium.backspaces, 'Low intensity should create shallower repairs than medium.');
     assert.ok(intensityAverages.medium.backspaces < intensityAverages.high.backspaces, 'High intensity should create deeper repairs than medium.');
+    assert.ok(intensityAverages.low.repairs <= intensityAverages.medium.repairs * 0.55, 'Low intensity should remain subtle compared with medium on long prose.');
     assert.ok(intensityAverages.medium.repairs >= Math.max(30, intensityAverages.low.repairs * 2), 'Medium intensity should feel noticeably more active than low on long prose.');
-    assert.ok(intensityAverages.high.repairs >= intensityAverages.medium.repairs * 1.2, 'High intensity should schedule materially more repair sequences than medium on long prose.');
-    assert.ok(intensityAverages.high.backspaces >= intensityAverages.medium.backspaces * 1.3, 'High intensity should create materially deeper repairs than medium on long prose.');
+    assert.ok(intensityAverages.high.repairs >= intensityAverages.medium.repairs * 1.6, 'High intensity should schedule substantially more repair sequences than medium on long prose.');
+    assert.ok(intensityAverages.high.backspaces >= intensityAverages.medium.backspaces * 1.8, 'High intensity should create much deeper repairs than medium on long prose.');
 
     const shortContrastText = 'This is a shorter draft with a couple of sentences, a comma, and enough plain prose to see whether correction modes feel clearly different when the sample is not especially long.';
     const shortContrastAverages = {
@@ -656,6 +1064,131 @@ async function validatePlanner() {
     assert.equal(variantAverages.low, 0, 'Low intensity should keep larger word-level variants disabled.');
     assert.ok(variantAverages.high > variantAverages.medium, 'High intensity should trigger more word-level variant outputs than medium on confusable-heavy prose.');
 
+    const commonMistakeText = [
+        'Because I definitely believe the separate government calendar is necessary, I will receive the available writing about business tomorrow.',
+        'My friend at college really noticed weird grammar in the argument, and the privilege of knowledge should not affect the weather.',
+        'The category and exercise notes are coming through, but the beginning still needs careful review.',
+        'The team will accommodate an achievement that apparently became convenient after an embarrassing environment problem.',
+        'The experience felt independent because the maintenance was occasionally successful, and the responsibility to recommend changes stayed important.',
+        'An acceptable answer can acquire confidence from a brilliant colleague, a careful decision, and an efficient description.',
+        'The professional schedule mentioned rhythm, science, sentences, preparation, and an unfortunate summary of the performance.'
+    ].join(' ');
+    const commonVariantWords = new Set();
+    for (let seed = 1; seed <= 120; seed += 1) {
+        const actions = hooks.buildActionPlan(commonMistakeText.repeat(3), 360 * 60, seed, 'high');
+        for (const word of collectWordVariantOutputs(actions)) {
+            commonVariantWords.add(word);
+        }
+    }
+
+    const expectedCommonVariants = [
+        'becuase',
+        'definately',
+        'recieve',
+        'seperate',
+        'goverment',
+        'calender',
+        'neccessary',
+        'freind',
+        'grammer',
+        'arguement',
+        'accomodate',
+        'acheivement',
+        'apparantly',
+        'convienient',
+        'embarass',
+        'enviroment',
+        'experiance',
+        'independant',
+        'maintainance',
+        'ocassionally',
+        'reccomend',
+        'responsiblity',
+        'succesful',
+        'acceptible',
+        'aquire',
+        'briliant',
+        'collegue',
+        'decison',
+        'efficent',
+        'discription',
+        'proffesional',
+        'scedule',
+        'rythm',
+        'sceince',
+        'sentance',
+        'preperation',
+        'unfortunatly',
+        'sumary',
+        'preformance'
+    ];
+    const matchedCommonVariants = expectedCommonVariants.filter((word) => commonVariantWords.has(word));
+    assert.ok(
+        matchedCommonVariants.length >= 24,
+        `High intensity should draw from the expanded common-mistake dataset. Saw: ${Array.from(commonVariantWords).sort().join(', ')}`
+    );
+
+    const longVariantText = [
+        'The accommodate achievement apparently required convenient maintenance.',
+        'The independent environment made the experience occasionally successful.',
+        'The responsibility to recommend a relevant reference was important.'
+    ].join(' ');
+    const longVariantWords = new Set();
+    for (let seed = 1; seed <= 180; seed += 1) {
+        const actions = hooks.buildActionPlan(longVariantText.repeat(4), 420 * 60, seed, 'high');
+        for (const word of collectWordVariantOutputs(actions)) {
+            longVariantWords.add(word);
+        }
+    }
+    const expectedLongVariants = [
+        'accomodate',
+        'acheivement',
+        'apparantly',
+        'convienient',
+        'maintainance',
+        'independant',
+        'enviroment',
+        'experiance',
+        'ocassionally',
+        'succesful',
+        'responsiblity',
+        'reccomend',
+        'relavent',
+        'refrence',
+        'importent'
+    ];
+    assert.ok(
+        expectedLongVariants.filter((word) => longVariantWords.has(word)).length >= 8,
+        `High intensity should support longer word-level mistakes. Saw: ${Array.from(longVariantWords).sort().join(', ')}`
+    );
+
+    const patternDiversityText = [
+        commonMistakeText,
+        longVariantText,
+        'I am in a hurry, but I still want the typing engine to feel varied, sloppy, and self-correcting around contractions like don\'t and hyphenated words like long-term.',
+        'Wait, really? I paused, then rushed back in. Stop, start, breathe, and keep going while punctuation changes and settles.',
+        'The writer moved through paragraphs with commas, corrections, small pauses, and a few words that could be confused later.'
+    ].join('\n\n');
+    const correctionPatternSignatures = new Set();
+    const correctionFamilySignatures = new Set();
+    for (let seed = 201; seed <= 216; seed += 1) {
+        const actions = hooks.buildActionPlan(patternDiversityText, 540 * 60, seed, 'high');
+        assert.equal(hooks.replayActionPlan(actions), patternDiversityText, `Pattern diversity draft ${seed} should replay exactly.`);
+        correctionPatternSignatures.add(buildCorrectionPatternSignature(actions));
+        correctionFamilySignatures.add(buildCorrectionFamilySignature(actions));
+    }
+    assert.ok(correctionPatternSignatures.size >= 14, 'High-intensity runs should not repeat the same correction pattern across nearby seeds.');
+    assert.ok(correctionFamilySignatures.size >= 6, 'High-intensity runs should vary the mix of letter, spacing, punctuation, joiner, and word-level corrections.');
+
+    const fourLetterSmallWordDraft = 'People waited with your notes from that room while they were ready and will return with your plan.';
+    let fourLetterSmallWordSkips = 0;
+    for (let seed = 1; seed <= 420; seed += 1) {
+        const actions = hooks.buildActionPlan(fourLetterSmallWordDraft, 300 * 60, seed, 'high');
+        assert.equal(hooks.replayActionPlan(actions), fourLetterSmallWordDraft, `Four-letter small-word draft ${seed} should replay exactly.`);
+        fourLetterSmallWordSkips += actions.filter((action) => action?.kind === 'repair-pause' && action.mistakeType === 'small-word-skip').length;
+    }
+    assert.ok(fourLetterSmallWordSkips > 0, 'High intensity should support skipped function words up to four letters, such as with/from/that/your.');
+
     const richMistakeText = [
         'I am in a hurry, but I still want the typing engine to feel varied, a little sloppy, and self-correcting.',
         'Because the draft is long enough, it should sometimes miss a comma, drop a space, repeat a word, or skip a small word before fixing itself.',
@@ -703,8 +1236,83 @@ async function validatePlanner() {
     assert.ok((punctuationMistakeCounts.get('multi-punct') || 0) > 0, 'High-intensity prose should allow occasional multi-punctuation bursts that are corrected later.');
 }
 
+function collectWordVariantOutputs(actions) {
+    const outputs = [];
+    let buffer = '';
+
+    for (const action of actions) {
+        if (action?.kind === 'word-variant-output') {
+            buffer += action.char || '';
+            continue;
+        }
+
+        if (buffer) {
+            outputs.push(buffer);
+            buffer = '';
+        }
+    }
+
+    if (buffer) {
+        outputs.push(buffer);
+    }
+
+    return outputs;
+}
+
+function buildCorrectionPatternSignature(actions) {
+    const parts = [];
+    let visibleChars = 0;
+    for (const action of actions) {
+        if (action?.kind === 'repair-pause' && action.mistakeType) {
+            parts.push(`${action.mistakeType}@${Math.floor(visibleChars / 24)}`);
+            continue;
+        }
+        if (action?.char && action.char !== 'backspace') {
+            visibleChars += 1;
+        }
+    }
+    return parts.join('|');
+}
+
+function buildCorrectionFamilySignature(actions) {
+    const counts = {
+        letter: 0,
+        spacing: 0,
+        punctuation: 0,
+        joiner: 0,
+        word: 0
+    };
+    for (const action of actions) {
+        if (action?.kind !== 'repair-pause' || !action.mistakeType) {
+            continue;
+        }
+        const family = getMistakeFamilyForTest(action.mistakeType);
+        counts[family] += 1;
+    }
+    return Object.entries(counts)
+        .map(([family, count]) => `${family}:${count}`)
+        .join('|');
+}
+
+function getMistakeFamilyForTest(type) {
+    if (type === 'word-variant') {
+        return 'word';
+    }
+    if (['space-omit', 'double-space', 'repeat-word', 'small-word-skip'].includes(type)) {
+        return 'spacing';
+    }
+    if (['punct-omit', 'space-before-punct', 'punct-substitute', 'multi-punct'].includes(type)) {
+        return 'punctuation';
+    }
+    if (['apostrophe-omit', 'hyphen-omit'].includes(type)) {
+        return 'joiner';
+    }
+    return 'letter';
+}
+
 function createBackgroundSandbox() {
     const storageState = Object.create(null);
+    const powerEvents = [];
     const sandbox = {
         console,
         globalThis: null,
@@ -713,14 +1321,21 @@ function createBackgroundSandbox() {
         Date,
         URL,
         setTimeout,
-        clearTimeout
+        clearTimeout,
+        navigator: {
+            userAgent: 'Mozilla/5.0 Chrome/123.0.0.0'
+        },
+        __powerEvents: powerEvents
     };
     sandbox.globalThis = sandbox;
     sandbox.chrome = {
         runtime: {
             onInstalled: { addListener() { } },
             onStartup: { addListener() { } },
-            onMessage: { addListener() { } }
+            onMessage: { addListener() { } },
+            getManifest() {
+                return { name: 'WriterDrip', version: '1.0.2', manifest_version: 3 };
+            }
         },
         alarms: {
             onAlarm: { addListener() { } },
@@ -731,11 +1346,35 @@ function createBackgroundSandbox() {
         tabs: {
             onRemoved: { addListener() { } },
             onUpdated: { addListener() { } },
-            async sendMessage() { return { status: 'ok', runtime: { state: 'running', percent: 0, eta: '00:10', actionIndex: 0, totalActions: 1 } }; },
+            async sendMessage(_tabId, message) {
+                if (message?.type === 'writerdrip:probe-editor') {
+                    return {
+                        status: 'ok',
+                        ready: true,
+                        docKey: 'test',
+                        checks: [
+                            { id: 'doc', label: 'Same Google Doc', pass: true, detail: 'Ready.' },
+                            { id: 'editor', label: 'Document editor detected', pass: true, detail: 'Ready.' },
+                            { id: 'cursor', label: 'Typing context ready', pass: true, detail: 'Ready.' }
+                        ],
+                        message: 'WriterDrip is ready to resume in this Google Doc.'
+                    };
+                }
+                return { status: 'ok', runtime: { state: 'running', percent: 0, eta: '00:10', actionIndex: 0, totalActions: 1 } };
+            },
             async get(tabId) { return { id: tabId, status: 'complete', url: 'https://docs.google.com/document/d/test/edit', discarded: false }; },
             async update() { }
         },
+        power: {
+            requestKeepAwake(level) {
+                powerEvents.push({ type: 'request', level });
+            },
+            releaseKeepAwake() {
+                powerEvents.push({ type: 'release' });
+            }
+        },
         storage: {
+            onChanged: { addListener() { } },
             local: {
                 async setAccessLevel() { },
                 async get(key) {
@@ -820,13 +1459,22 @@ function createPopupSandbox() {
         setTimeout,
         clearTimeout,
         document,
-        window: null
+        window: null,
+        navigator: {
+            userAgent: 'Mozilla/5.0 Chrome/123.0.0.0',
+            clipboard: {
+                async writeText() { }
+            }
+        }
     };
     sandbox.window = sandbox;
     sandbox.globalThis = sandbox;
     sandbox.chrome = {
         runtime: {
-            async sendMessage() { return { ok: true, state: {} }; }
+            async sendMessage() { return { ok: true, state: {} }; },
+            getManifest() {
+                return { name: 'WriterDrip', version: '1.0.2', manifest_version: 3 };
+            }
         },
         storage: {
             onChanged: { addListener() { } },
@@ -861,7 +1509,8 @@ function createContentSandbox() {
         setTimeout,
         clearTimeout,
         navigator: { userAgent: 'node' },
-        location: { href: 'https://docs.google.com/document/d/test/edit' }
+        location: { href: 'https://docs.google.com/document/d/test/edit' },
+        Node: { ELEMENT_NODE: 1 }
     };
     sandbox.globalThis = sandbox;
     sandbox.window = {

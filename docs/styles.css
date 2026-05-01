@@ -183,6 +183,34 @@ code {
   font-size: 1.04rem;
 }
 
+.trust-section .section-copy p:last-child {
+  color: var(--muted);
+}
+
+.trust-grid {
+  margin-top: 24px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.trust-grid article {
+  display: grid;
+  gap: 6px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.trust-grid strong {
+  color: var(--accent-deep);
+}
+
+.trust-grid span {
+  color: var(--muted);
+}
+
 .feature-grid {
   display: grid;
   gap: 22px;
@@ -275,6 +303,7 @@ code {
   .hero,
   .feature-card,
   .faq-grid,
+  .trust-grid,
   .step-list {
     grid-template-columns: 1fr;
   }
