@@ -78,6 +78,8 @@ async function validatePopupHtml() {
     assert.match(popupHtml, /id="copyDebugBtn"/, 'popup.html should include a copy debug report button.');
     assert.match(popupHtml, /id="keepAwakeToggle"/, 'popup.html should include the keep-awake preference toggle.');
     assert.match(popupHtml, /Keep computer awake/, 'popup.html should label the keep-awake preference clearly.');
+    assert.match(popupHtml, /id="versionLabel"/, 'popup.html should show the installed WriterDrip version.');
+    assert.match(popupHtml, /CHANGELOG\.md/, 'popup.html should link users to the changelog.');
     assert.match(popupHtml, /Duration \(minutes\)/, 'popup.html should label the duration input in minutes.');
     assert.match(popupHtml, /Enter the duration as minutes/, 'popup.html should tell users to enter custom duration values as minutes.');
     assert.doesNotMatch(popupHtml, /id="scheduleGroup"/, 'popup.html should not ship the removed run window controls.');
@@ -483,7 +485,7 @@ async function validateBackgroundRuntime() {
     const debugJson = JSON.stringify(debugReport);
     assert.doesNotMatch(debugJson, /Secret draft phrase/i, 'Debug reports should exclude draft text even if the popup context accidentally includes it.');
     assert.doesNotMatch(debugJson, /Secret debug label|Secret preflight|Secret check/i, 'Debug reports should redact unexpected popup diagnostic strings.');
-    assert.equal(debugReport.extension.version, '1.0.2', 'Debug reports should include the extension version.');
+    assert.equal(debugReport.extension.version, '1.0.3', 'Debug reports should include the extension version.');
     assert.equal(debugReport.browser.family, 'Chrome', 'Debug reports should keep a normalized browser family.');
     assert.equal(Object.prototype.hasOwnProperty.call(debugReport.browser, 'userAgent'), false, 'Debug reports should not include full user-agent strings.');
     assert.equal(debugReport.session.issueCode, 'editor-not-ready', 'Debug reports should include the current issue code.');
@@ -714,7 +716,7 @@ async function validatePopupRuntime() {
         /Secret popup draft phrase|Secret popup label|Secret popup issue|Secret popup check/i,
         'Popup fallback debug reports should not include draft text or unexpected diagnostic strings.'
     );
-    assert.equal(localDebugReport.extension.version, '1.0.2', 'Popup fallback debug reports should include the extension version.');
+    assert.equal(localDebugReport.extension.version, '1.0.3', 'Popup fallback debug reports should include the extension version.');
     assert.equal(Object.prototype.hasOwnProperty.call(localDebugReport.browser, 'userAgent'), false, 'Popup fallback debug reports should not include full user-agent strings.');
     assert.equal(localDebugReport.popup.preflight.failedCheckIds[0], 'check-redacted', 'Popup fallback debug reports should redact unexpected failed check ids.');
 
@@ -1351,7 +1353,7 @@ function createBackgroundSandbox() {
             onStartup: { addListener() { } },
             onMessage: { addListener() { } },
             getManifest() {
-                return { name: 'WriterDrip', version: '1.0.2', manifest_version: 3 };
+                return { name: 'WriterDrip', version: '1.0.3', manifest_version: 3 };
             }
         },
         alarms: {
@@ -1490,7 +1492,7 @@ function createPopupSandbox() {
         runtime: {
             async sendMessage() { return { ok: true, state: {} }; },
             getManifest() {
-                return { name: 'WriterDrip', version: '1.0.2', manifest_version: 3 };
+                return { name: 'WriterDrip', version: '1.0.3', manifest_version: 3 };
             }
         },
         storage: {

@@ -371,6 +371,22 @@
       gap: 8px;
     }
 
+    .version-footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 10px;
+      padding: 0 2px 2px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .version-footer a {
+      color: var(--accent-deep);
+      text-decoration: none;
+    }
+
     .panel-header {
       display: flex;
       justify-content: space-between;
@@ -711,6 +727,10 @@
         </section>
       </div>
     </section>
+    <footer class="version-footer">
+      <span id="versionLabel">WriterDrip v...</span>
+      <a href="https://github.com/Highdrys01/WriterDrip/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer">Changelog</a>
+    </footer>
   </main>
 
   <script src="shared.js"></script>

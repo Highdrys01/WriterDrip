@@ -6,6 +6,8 @@ WriterDrip is a free and open-source Chrome extension for paced typing in Google
 
 Local-first, always free, and built for the Google Doc already open in your browser.
 
+Current version: `1.0.3`. See [`CHANGELOG.md`](CHANGELOG.md) for update notes.
+
 <p align="center">
   <img src="docs/assets/writerdrip-overview-card.png" alt="WriterDrip popup overview" width="500">
 </p>
@@ -43,6 +45,15 @@ WriterDrip competes on transparency instead of cloud lock-in:
 - WriterDrip cannot run if the browser is closed, the computer shuts down, or the lid forces sleep.
 - If the Doc tab reloads or closes unexpectedly, reopen the same Google Doc and use `Resume` if WriterDrip offers it.
 - Reload the extension from `chrome://extensions` after pulling updates from GitHub.
+
+## Updates And Versions
+
+WriterDrip uses semantic versions like `1.0.3` so testers can clearly report which build they are using.
+
+- Check the popup footer to see your installed version.
+- Check `CHANGELOG.md` to see what changed in each release.
+- After pulling or downloading a newer version, reload WriterDrip from `chrome://extensions`.
+- If a bug report does not include a version, ask for the popup footer version first.
 
 ## Why People Use It
 

@@ -53,6 +53,7 @@ const statusTextEl = document.getElementById('statusText');
 const statusHintEl = document.getElementById('statusHint');
 const debugActionsEl = document.getElementById('debugActions');
 const copyDebugBtn = document.getElementById('copyDebugBtn');
+const versionLabel = document.getElementById('versionLabel');
 const correctionPreviewPanel = document.getElementById('correctionPreviewPanel');
 const correctionPreviewMetaEl = document.getElementById('correctionPreviewMeta');
 const correctionPreviewSummaryEl = document.getElementById('correctionPreviewSummary');
@@ -196,6 +197,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     updatePresetSelection();
     updateCorrectionUi();
     syncKeepAwakeUi();
+    syncVersionLabel();
     syncButtons();
     bindEvents();
     await loadActiveTab();
@@ -2026,6 +2028,15 @@ function getExtensionManifest() {
     } catch (_error) {
         return {};
     }
+}
+
+function syncVersionLabel() {
+    if (!versionLabel) {
+        return;
+    }
+
+    const manifest = getExtensionManifest();
+    versionLabel.innerText = `WriterDrip v${manifest.version || 'unknown'}`;
 }
 
 function parseBrowserVersion(userAgent) {

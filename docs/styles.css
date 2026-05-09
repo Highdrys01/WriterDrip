@@ -299,6 +299,11 @@ code {
   margin-top: 12px;
 }
 
+.version-note {
+  margin-top: 10px;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 900px) {
   .hero,
   .feature-card,
