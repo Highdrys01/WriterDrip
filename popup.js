@@ -652,6 +652,8 @@ function renderActiveJob() {
     activeDetails.innerText = `${formatDuration(activeJob.durationMins)} • ${activeJob.wordCount} words • ${activeJob.charCount} chars${correctionLabel} • ETA ${sessionState.eta}`;
     activeMeta.innerText = sessionState.state === 'attention'
         ? canResumeAttentionState(sessionState.attentionCode) ? 'Needs attention' : 'Restart required'
+        : sessionState.state === 'starting'
+            ? 'Attaching'
         : sessionState.isPaused
             ? isSafetyPause(sessionState.pauseReason) ? 'Paused safely' : 'Paused'
             : sessionState.isRunning
@@ -659,6 +661,8 @@ function renderActiveJob() {
                 : 'Preparing';
     pauseBtn.innerText = sessionState.state === 'attention' && !canResumeAttentionState(sessionState.attentionCode)
         ? 'Restart needed'
+        : sessionState.state === 'starting'
+            ? 'Starting...'
         : sessionState.isPaused || sessionState.state === 'attention'
             ? 'Resume'
             : 'Pause';
@@ -687,6 +691,16 @@ function renderStatus() {
                 : safetyPause
                     ? 'Click the intended insertion point in the document body, then press Resume. WriterDrip checks the Doc before continuing.'
                     : 'You can leave this paused and come back later. Reopen the same Google Doc and press Resume when you are ready.',
+            tone: 'muted'
+        });
+        return;
+    }
+
+    if (sessionState.activeJob && sessionState.state === 'starting') {
+        setStatus({
+            title: 'Preparing drip',
+            message: 'WriterDrip is attaching to the Google Doc editor.',
+            hint: 'If this hangs, press Stop, reload the Google Doc, click inside the document body, and start again.',
             tone: 'muted'
         });
         return;
@@ -795,6 +809,7 @@ function syncButtons() {
     const hasActiveTab = Boolean(currentTabId);
     const hasActiveRun = Boolean(sessionState.activeJob);
     const onGoogleDoc = currentPageKind === PAGE_KINDS.GOOGLE_DOC;
+    const isStarting = sessionState.state === 'starting';
     const resumeIntent = hasActiveRun && (sessionState.isPaused || sessionState.state === 'attention');
     const preflightBlockingStart = shouldShowPreflightPanel() &&
         preflightState.status === 'ready' &&
@@ -804,7 +819,7 @@ function syncButtons() {
 
     startBtn.disabled = uiBusy || !onGoogleDoc || !hasActiveTab || !hasDraft || !validDuration || hasActiveRun || preflightBlockingStart;
     clearBtn.disabled = uiBusy || inputText.value.length === 0;
-    pauseBtn.disabled = uiBusy || !hasActiveRun || !onGoogleDoc || (sessionState.state === 'attention' && !canResumeAttentionState(sessionState.attentionCode)) || resumeBlocking;
+    pauseBtn.disabled = uiBusy || !hasActiveRun || !onGoogleDoc || isStarting || (sessionState.state === 'attention' && !canResumeAttentionState(sessionState.attentionCode)) || resumeBlocking;
     stopBtn.disabled = uiBusy || !hasActiveRun;
 
     startBtn.innerText = uiBusy ? 'Working...' : hasActiveRun ? 'Drip active' : 'Start drip';
@@ -1915,7 +1930,8 @@ function buildLocalDebugReport(popupContext = buildPopupDebugContext()) {
             manifestVersion: manifest.manifest_version || 3
         },
         browser: {
-            userAgent: globalThis.navigator?.userAgent || 'unknown'
+            family: parseBrowserFamily(globalThis.navigator?.userAgent || ''),
+            version: parseBrowserVersion(globalThis.navigator?.userAgent || '')
         },
         tab: {
             idPresent: Boolean(currentTabId),
@@ -2010,6 +2026,23 @@ function getExtensionManifest() {
     } catch (_error) {
         return {};
     }
+}
+
+function parseBrowserVersion(userAgent) {
+    const value = String(userAgent || '');
+    const match = value.match(/\b(Edg|Chrome|Chromium|Firefox|Version)\/([\d.]+)/);
+    if (!match) {
+        return 'unknown';
+    }
+    return `${match[1]} ${match[2]}`;
+}
+
+function parseBrowserFamily(userAgent) {
+    const version = parseBrowserVersion(userAgent);
+    if (version === 'unknown') {
+        return 'unknown';
+    }
+    return version.split(' ')[0] || 'unknown';
 }
 
 function syncMinimumDuration(forceAdjust = false) {
@@ -2293,11 +2326,21 @@ async function saveDraft() {
         return;
     }
 
-    await chrome.storage.local.set({
-        [`dripText_${currentTabId}`]: inputText.value,
-        [`dripDuration_${currentTabId}`]: durationInput.value,
-        [`dripCorrectionIntensity_${currentTabId}`]: normalizeCorrectionIntensity(selectedCorrectionIntensity)
-    });
+    try {
+        await chrome.storage.local.set({
+            [`dripText_${currentTabId}`]: inputText.value,
+            [`dripDuration_${currentTabId}`]: durationInput.value,
+            [`dripCorrectionIntensity_${currentTabId}`]: normalizeCorrectionIntensity(selectedCorrectionIntensity)
+        });
+    } catch (error) {
+        console.warn('[WriterDrip] Could not save the current draft locally.', error);
+        setStatus({
+            title: 'Draft could not be saved locally',
+            message: 'Chrome rejected the local save, usually because extension storage is full.',
+            hint: 'Shorten the draft, clear the old draft, or reload the extension before starting a long run.',
+            tone: 'warn'
+        });
+    }
 }
 
 async function saveKeepAwakePreference() {

@@ -134,7 +134,8 @@ WriterDrip competes on transparency instead of cloud lock-in:
 - WriterDrip does not send text to any server.
 - WriterDrip stores drafts, durations, and active session state locally with `chrome.storage.local`.
 - The keep-awake preference is stored locally and defaults to on. Turn off `Keep computer awake` in the popup if you do not want WriterDrip to request Chrome system keep-awake during active runs.
-- The extension only operates on the current page after the user invokes it.
+- The extension uses a scoped Google Docs document permission, `https://docs.google.com/document/*`, so pause, resume, and recovery can reattach after reloads without broad all-site access.
+- Popup draft fields are cleared when their related tab closes; active run recovery state is kept only when WriterDrip needs it to resume or explain a run.
 - This repository is an independent open-source project and is not affiliated with other typing products or services.
 
 For the full policy text, see `PRIVACY.md`.

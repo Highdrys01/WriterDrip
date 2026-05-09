@@ -6,7 +6,7 @@
  * https://github.com/Highdrys01/WriterDrip
  */
 
-const WRITERDRIP_RUNNER_VERSION = '2026.04.09.1';
+const WRITERDRIP_RUNNER_VERSION = '2026.04.09.2';
 if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSION) {
     try {
         globalThis.__writerdripRunnerController?.dispose?.();
@@ -974,7 +974,8 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             lockedElement: target,
             lastCompletionVerification: null,
             lastReportedAt: 0,
-            loopPromise: null
+            loopPromise: null,
+            loopActive: false
         };
         runner.totalSeconds = runner.cumulativeDelays[runner.cumulativeDelays.length - 1] || 0;
         runner.elapsedSeconds = runner.cumulativeDelays[runner.completedIndex] || 0;
@@ -996,10 +997,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             };
         }
 
-        runner.loopPromise = runLoop(message.runId).catch(async (error) => {
-            console.error('[WriterDrip] Runner loop failed.', error);
-            await failRun(ISSUE_CODES.RUNTIME_ERROR, error.message || 'The editor rejected simulated typing.');
-        });
+        launchRunLoop(message.runId);
 
         return {
             status: 'started',
@@ -1042,6 +1040,7 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         runner.state = RUNNER_STATES.RUNNING;
         runner.pauseStartedAtMs = 0;
         runner.pauseReason = null;
+        launchRunLoop(runId);
         await reportProgress(true);
         return {
             status: 'ok',
@@ -1117,6 +1116,28 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         if (runner.runId === expectedRunId && !runner.stopRequested) {
             await completeRun();
         }
+    }
+
+    function launchRunLoop(runId) {
+        if (!matchesActiveRun(runId) || runner.loopActive || runner.state === RUNNER_STATES.COMPLETE || runner.state === RUNNER_STATES.ERROR) {
+            return;
+        }
+
+        runner.loopActive = true;
+        const loopPromise = runLoop(runId)
+            .catch(async (error) => {
+                console.error('[WriterDrip] Runner loop failed.', error);
+                if (runner.runId === runId) {
+                    await failRun(ISSUE_CODES.RUNTIME_ERROR, error.message || 'The editor rejected simulated typing.');
+                }
+            })
+            .finally(() => {
+                if (runner.runId === runId && runner.loopPromise === loopPromise) {
+                    runner.loopActive = false;
+                    runner.loopPromise = null;
+                }
+            });
+        runner.loopPromise = loopPromise;
     }
 
     async function ensureActiveTarget() {
@@ -1743,6 +1764,11 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             return;
         }
 
+        if (interceptTrustedTypingMutation(event)) {
+            void pauseForRecoverableInterference(ISSUE_CODES.MANUAL_INTERACTION, 'WriterDrip paused before manual typing changed the document. Review the cursor, then press Resume to continue from the saved checkpoint.');
+            return;
+        }
+
         const editorIssue = getTrustedEditorChangeIssue(event);
         if (editorIssue) {
             void failRun(editorIssue);
@@ -1750,6 +1776,47 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
         }
 
         void failRun(ISSUE_CODES.MANUAL_INTERACTION, 'Manual interaction was detected in the Google Doc. Click back into the document and resume when you are ready.');
+    }
+
+    function interceptTrustedTypingMutation(event) {
+        if (!event || !eventTargetsGoogleDocsTypingSurface(event.target)) {
+            return false;
+        }
+
+        const shouldIntercept = event.type === 'keydown'
+            ? isDocumentMutationKey(event)
+            : event.type === 'beforeinput';
+        if (!shouldIntercept) {
+            return false;
+        }
+
+        if (typeof event.preventDefault === 'function' && event.cancelable !== false) {
+            event.preventDefault();
+        }
+        if (typeof event.stopImmediatePropagation === 'function') {
+            event.stopImmediatePropagation();
+        } else if (typeof event.stopPropagation === 'function') {
+            event.stopPropagation();
+        }
+        return true;
+    }
+
+    function isDocumentMutationKey(event) {
+        if (!event || event.metaKey || event.ctrlKey || event.altKey || isModifierOnlyKey(event)) {
+            return false;
+        }
+
+        if (String(event.key || '').length === 1) {
+            return true;
+        }
+
+        return [
+            'Backspace',
+            'Delete',
+            'Enter',
+            'Tab',
+            'Spacebar'
+        ].includes(event.key);
     }
 
     function handleTrustedPointerInterference(event) {
@@ -5035,7 +5102,8 @@ if (globalThis.__writerdripRunnerController?.version !== WRITERDRIP_RUNNER_VERSI
             lockedElement: null,
             lastCompletionVerification: null,
             lastReportedAt: 0,
-            loopPromise: null
+            loopPromise: null,
+            loopActive: false
         };
     }
 

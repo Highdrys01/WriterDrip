@@ -51,6 +51,10 @@ async function validateManifest() {
     assert.equal(manifest.background?.service_worker, 'background.js', 'Background worker should stay on background.js.');
     assert.equal(manifest.action?.default_popup, 'popup.html', 'Popup should stay on popup.html.');
     assert.ok(manifest.permissions?.includes('power'), 'Manifest should include the power permission so active drips can prevent local system sleep.');
+    assert.ok(
+        manifest.host_permissions?.includes('https://docs.google.com/document/*'),
+        'Manifest should include a scoped Google Docs host permission so recovery can reattach after MV3 activeTab access expires.'
+    );
 }
 
 async function validatePopupHtml() {
@@ -91,6 +95,16 @@ async function validatePopupHtml() {
         'background.js must inject shared.js before content.js.'
     );
     assert.match(backgroundSource, /KEEP_AWAKE_ENABLED_KEY/, 'background.js should use the shared keep-awake preference key.');
+    assert.match(backgroundSource, /clearPopupDraftStateForTab/, 'background.js should clear per-tab popup drafts when tabs close.');
+    assert.match(backgroundSource, /parseBrowserFamily/, 'background.js debug reports should use a normalized browser family instead of a full user-agent string.');
+
+    const contentSource = await fs.readFile(path.join(rootDir, 'content.js'), 'utf8');
+    assert.match(contentSource, /function launchRunLoop/, 'content.js should restart the typing loop after recoverable pauses.');
+    assert.match(contentSource, /interceptTrustedTypingMutation/, 'content.js should intercept user typing before it drifts the Google Doc during active runs.');
+
+    const privacySource = await fs.readFile(path.join(rootDir, 'PRIVACY.md'), 'utf8');
+    assert.match(privacySource, /host_permissions.*docs\.google\.com\/document/i, 'PRIVACY.md should disclose the scoped Google Docs host permission.');
+    assert.match(privacySource, /`power`.*Keep computer awake/i, 'PRIVACY.md should disclose the optional keep-awake power permission.');
 }
 
 async function validateSyntax() {
@@ -470,6 +484,8 @@ async function validateBackgroundRuntime() {
     assert.doesNotMatch(debugJson, /Secret draft phrase/i, 'Debug reports should exclude draft text even if the popup context accidentally includes it.');
     assert.doesNotMatch(debugJson, /Secret debug label|Secret preflight|Secret check/i, 'Debug reports should redact unexpected popup diagnostic strings.');
     assert.equal(debugReport.extension.version, '1.0.2', 'Debug reports should include the extension version.');
+    assert.equal(debugReport.browser.family, 'Chrome', 'Debug reports should keep a normalized browser family.');
+    assert.equal(Object.prototype.hasOwnProperty.call(debugReport.browser, 'userAgent'), false, 'Debug reports should not include full user-agent strings.');
     assert.equal(debugReport.session.issueCode, 'editor-not-ready', 'Debug reports should include the current issue code.');
     assert.equal(debugReport.tab.docStatus.sameAsActiveJob, true, 'Debug reports should include same-Doc status without exposing the Doc id.');
 
@@ -699,6 +715,7 @@ async function validatePopupRuntime() {
         'Popup fallback debug reports should not include draft text or unexpected diagnostic strings.'
     );
     assert.equal(localDebugReport.extension.version, '1.0.2', 'Popup fallback debug reports should include the extension version.');
+    assert.equal(Object.prototype.hasOwnProperty.call(localDebugReport.browser, 'userAgent'), false, 'Popup fallback debug reports should not include full user-agent strings.');
     assert.equal(localDebugReport.popup.preflight.failedCheckIds[0], 'check-redacted', 'Popup fallback debug reports should redact unexpected failed check ids.');
 
     const normalizedSummary = hooks.normalizeUiRunSummary({

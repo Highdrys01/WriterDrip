@@ -10,6 +10,9 @@
         "scripting",
         "storage"
     ],
+    "host_permissions": [
+        "https://docs.google.com/document/*"
+    ],
     "background": {
         "service_worker": "background.js"
     },

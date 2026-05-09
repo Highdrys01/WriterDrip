@@ -104,6 +104,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
         const sessions = await readSessions();
         const session = sessions[String(tabId)];
         if (!session) {
+            await clearPopupDraftStateForTab(tabId);
             return;
         }
 
@@ -112,6 +113,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
         }
 
         await writeSessions(sessions);
+        await clearPopupDraftStateForTab(tabId);
     }).then(() => syncHealthAlarm()).catch((error) => {
         console.error('[WriterDrip] Failed to remove closed tab session.', error);
     });
@@ -329,7 +331,14 @@ async function handlePauseToggle(tabId) {
         return buildErrorResponse(ISSUE_CODES.NO_ACTIVE_RUN, 'Nothing is currently running in this tab.');
     }
 
-    if (session.state === SESSION_STATES.ATTENTION || session.state === SESSION_STATES.STARTING) {
+    if (session.state === SESSION_STATES.STARTING) {
+        return buildErrorResponse(
+            ISSUE_CODES.EDITOR_NOT_READY,
+            'WriterDrip is still attaching to the Google Doc. Wait a moment, or press Stop if you want to cancel this start.'
+        );
+    }
+
+    if (session.state === SESSION_STATES.ATTENTION) {
         if (!canResumeAttentionState(session.attentionCode)) {
             return buildErrorResponse(
                 session.attentionCode || ISSUE_CODES.RUNTIME_ERROR,
@@ -396,7 +405,23 @@ async function handlePauseToggle(tabId) {
         }
     }
 
-    const response = await sendRunnerCommand(tabId, { type: 'writerdrip:pause-job', runId: session.activeRunId });
+    let response = null;
+    try {
+        response = await sendRunnerCommand(tabId, { type: 'writerdrip:pause-job', runId: session.activeRunId });
+    } catch (error) {
+        const issueCode = inferIssueCode(error?.message || '');
+        await markRunNeedsAttention(
+            tabId,
+            session.activeRunId,
+            issueCode === ISSUE_CODES.RUNTIME_ERROR ? ISSUE_CODES.TYPING_CONTEXT_LOST : issueCode,
+            'WriterDrip lost contact with the Google Doc while pausing. Reopen the Doc, click inside the document body, then use Resume or Stop.'
+        );
+        await syncHealthAlarm();
+        return {
+            ok: true,
+            state: await getUiState(tabId)
+        };
+    }
 
     await withSessionLock(async () => {
         const sessions = await readSessions();
@@ -586,6 +611,27 @@ async function handleRunnerError(tabId, payload) {
 
     await syncHealthAlarm();
     return { ok: true };
+}
+
+async function markRunNeedsAttention(tabId, runId, code, message) {
+    await withSessionLock(async () => {
+        const sessions = await readSessions();
+        const session = getSessionForTab(sessions, tabId);
+        if (runId && session.activeRunId !== runId) {
+            return;
+        }
+
+        const issueCode = code || inferIssueCode(message);
+        session.state = SESSION_STATES.ATTENTION;
+        session.lastError = message || 'WriterDrip needs attention before it can continue.';
+        session.lastErrorCode = issueCode;
+        session.attentionCode = issueCode;
+        session.attentionMessage = getRecoveryHint(issueCode, message || 'Open the Google Doc and try again.');
+        session.interruptionCount = Math.max(0, session.interruptionCount || 0) + 1;
+        session.lastHeartbeatAt = Date.now();
+        session.updatedAt = Date.now();
+        await writeSessions(sessions);
+    });
 }
 
 async function recoverActiveSessions() {
@@ -997,6 +1043,21 @@ async function writeSessions(sessions) {
     await safeSyncActionIndicators(sessions);
     await safeSyncDiscardProtection(sessions);
     await safeSyncPowerKeepAwake(sessions);
+}
+
+async function clearPopupDraftStateForTab(tabId) {
+    if (!tabId) {
+        return;
+    }
+
+    await chrome.storage.local.remove([
+        `dripText_${tabId}`,
+        `dripDuration_${tabId}`,
+        `dripCorrectionIntensity_${tabId}`,
+        `dripScheduleMode_${tabId}`,
+        `dripScheduleStart_${tabId}`,
+        `dripScheduleEnd_${tabId}`
+    ]);
 }
 
 function getSessionForTab(sessions, tabId) {
@@ -1665,7 +1726,7 @@ async function syncPowerKeepAwake(sessions) {
         return;
     }
 
-    if (!shouldKeepAwake && powerKeepAwakeActive) {
+    if (!shouldKeepAwake) {
         await releaseSystemKeepAwake();
         powerKeepAwakeActive = false;
     }
@@ -1795,7 +1856,7 @@ function buildDebugReport(context = {}) {
             manifestVersion: manifest.manifest_version || 3
         },
         browser: {
-            userAgent: getUserAgent(),
+            family: parseBrowserFamily(getUserAgent()),
             version: parseBrowserVersion(getUserAgent())
         },
         tab: {
@@ -1944,6 +2005,14 @@ function parseBrowserVersion(userAgent) {
         return 'unknown';
     }
     return `${match[1]} ${match[2]}`;
+}
+
+function parseBrowserFamily(userAgent) {
+    const version = parseBrowserVersion(userAgent);
+    if (version === 'unknown') {
+        return 'unknown';
+    }
+    return version.split(' ')[0] || 'unknown';
 }
 
 function classifyUrl(url) {

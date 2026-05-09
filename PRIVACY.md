@@ -10,7 +10,8 @@ WriterDrip is designed to work locally in your browser. It does not send pasted 
 
 - Text that you paste into the extension popup
 - The active tab when you explicitly invoke the extension
-- The currently focused editor on the page when you start typing
+- Editable Google Docs document pages so active and recoverable runs can attach to the document editor
+- The currently focused Google Docs editor when you start typing
 
 ## What WriterDrip Stores
 
@@ -34,13 +35,15 @@ This local data is used only to restore the popup and active session state for t
 ## Permissions
 
 - `activeTab`: lets WriterDrip access the current page only after you invoke the extension
-- `scripting`: lets WriterDrip inject its content script into the current page after that user action
+- `host_permissions` for `https://docs.google.com/document/*`: lets WriterDrip reattach to Google Docs documents during pause, resume, reload, and recovery without requesting broad access to every website
+- `scripting`: lets WriterDrip inject its content script into Google Docs document pages
 - `storage`: lets WriterDrip keep your draft text, duration, and active session state locally in the browser
 - `alarms`: lets WriterDrip re-check active sessions for recovery
+- `power`: lets the optional `Keep computer awake` setting ask Chrome to prevent system sleep during active runs
 
 ## Data Retention
 
-Locally stored draft and session data remains in browser extension storage until you clear it, overwrite it, remove the extension, or the stored state is replaced by a newer session.
+Locally stored draft and session data remains in browser extension storage until you clear it, overwrite it, remove the extension, close the related tab, or the stored state is replaced by a newer session.
 
 ## Policy Scope
 
